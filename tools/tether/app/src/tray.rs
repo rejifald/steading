@@ -102,7 +102,7 @@ pub fn run() {
                 window::watch_focus(&handle, &state);
                 std::thread::spawn({
                     let state = state.clone();
-                    move || worker::run(handle, state, rx)
+                    move || worker::run(&handle, &state, &rx)
                 });
                 Ok(())
             }

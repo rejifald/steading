@@ -26,6 +26,7 @@ pub enum Health {
 }
 
 impl Health {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Health::InSync => "in sync",
@@ -85,6 +86,7 @@ pub enum Reason {
 }
 
 impl Reason {
+    #[must_use]
     pub fn health(&self) -> Health {
         match self {
             Reason::IndexLocked | Reason::Busy | Reason::Gated { .. } => Health::Skipped,
@@ -94,6 +96,7 @@ impl Reason {
 
     /// What the owner does to clear a *needs you* reason, for the repo listed
     /// on `branch` of `remote`. `None` for a skip that clears by itself.
+    #[must_use]
     pub fn hint(&self, remote: &str, branch: &str) -> Option<String> {
         let text = match self {
             Reason::Missing => "Clone the repo there, or fix its path in repos.toml.".into(),
@@ -158,6 +161,10 @@ impl fmt::Display for Reason {
 }
 
 /// A clone's git directory, checked to be a main clone at exactly `path`.
+///
+/// # Errors
+///
+/// Fails with the [`Reason`] the path is not a main clone: missing, not a git clone, not at its top level, or a linked worktree.
 pub fn git_dir(ctx: &Ctx, path: &Path) -> Result<PathBuf, Reason> {
     if !path.exists() {
         return Err(Reason::Missing);
@@ -192,6 +199,7 @@ pub fn git_dir(ctx: &Ctx, path: &Path) -> Result<PathBuf, Reason> {
 
 /// The operation under way in `git_dir`, if any. These are the marker files
 /// git itself checks (`git status` reads the same ones).
+#[must_use]
 pub fn operation_in_progress(git_dir: &Path) -> Option<&'static str> {
     [
         ("rebase-merge", "rebase"),
@@ -206,11 +214,13 @@ pub fn operation_in_progress(git_dir: &Path) -> Option<&'static str> {
     .map(|(_, op)| op)
 }
 
+#[must_use]
 pub fn index_locked(git_dir: &Path) -> bool {
     git_dir.join("index.lock").exists()
 }
 
 /// Rule 4 for both modes: skip while git or an operation holds the clone.
+#[must_use]
 pub fn busy_reason(git_dir: &Path) -> Option<Reason> {
     if index_locked(git_dir) {
         return Some(Reason::IndexLocked);
@@ -222,12 +232,20 @@ pub fn busy_reason(git_dir: &Path) -> Option<Reason> {
 
 /// Tracked files that differ from HEAD, staged or not. Untracked files are
 /// not counted: `follow` allows them (rule 5).
+///
+/// # Errors
+///
+/// Fails when git cannot be started or exits non-zero.
 pub fn tracked_changes(ctx: &Ctx, path: &Path) -> anyhow::Result<usize> {
     let out = ctx.read(path, &["status", "--porcelain=v1", "--untracked-files=no"])?;
     Ok(out.lines().filter(|l| !l.is_empty()).count())
 }
 
 /// `(ahead, behind)` of `local` against `remote`.
+///
+/// # Errors
+///
+/// Fails when git cannot be started or exits non-zero.
 pub fn ahead_behind(
     ctx: &Ctx,
     path: &Path,

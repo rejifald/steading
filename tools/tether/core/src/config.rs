@@ -36,6 +36,7 @@ pub enum Mode {
 }
 
 impl Mode {
+    #[must_use]
     pub fn label(self) -> &'static str {
         match self {
             Mode::Follow => "follow",
@@ -89,18 +90,20 @@ pub struct Repo {
 
 impl Repo {
     /// The short name used for backups and `tether sync <repo>`: the directory's name.
+    #[must_use]
     pub fn name(&self) -> String {
         self.path
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "repo".into())
+            .map_or_else(|| "repo".into(), |n| n.to_string_lossy().into_owned())
     }
 
+    #[must_use]
     pub fn tracking_ref(&self) -> String {
         format!("refs/remotes/{}/{}", self.remote, self.branch)
     }
 
     /// Whether `selector` (a name or a path) names this repo.
+    #[must_use]
     pub fn matches(&self, selector: &str, paths: &Paths) -> bool {
         if selector == self.name() {
             return true;
@@ -111,6 +114,10 @@ impl Repo {
 }
 
 /// `5m`, `90s`, `1h`, or a bare number of seconds.
+///
+/// # Errors
+///
+/// Fails when `s` is empty, has no number, has an unknown unit, or is zero.
 pub fn parse_interval(s: &str) -> Result<Duration> {
     let s = s.trim();
     let (num, unit) = match s.find(|c: char| !c.is_ascii_digit()) {
@@ -138,6 +145,10 @@ pub fn parse_interval(s: &str) -> Result<Duration> {
 
 /// A `gate` or `after` command as given: `None` when absent, an error when
 /// empty, since an empty command would gate nothing and run nothing.
+///
+/// # Errors
+///
+/// Fails when `command` is present but empty.
 pub fn parse_command(key: &str, command: Option<&str>) -> Result<Option<String>> {
     match command {
         None => Ok(None),
@@ -148,6 +159,7 @@ pub fn parse_command(key: &str, command: Option<&str>) -> Result<Option<String>>
 
 /// The path made absolute against the current directory, resolving symlinks
 /// when it exists (macOS `/var` vs `/private/var`).
+#[must_use]
 pub fn absolute(p: &Path) -> PathBuf {
     let p = if p.is_absolute() {
         p.to_path_buf()
@@ -157,11 +169,15 @@ pub fn absolute(p: &Path) -> PathBuf {
     std::fs::canonicalize(&p).unwrap_or(p)
 }
 
+#[must_use]
 pub fn same_path(a: &Path, b: &Path) -> bool {
     absolute(a) == absolute(b)
 }
 
 impl Config {
+    /// # Errors
+    ///
+    /// Fails when the file exists but cannot be read or is not valid TOML.
     pub fn load(paths: &Paths) -> Result<Self> {
         let file = paths.config_file();
         match std::fs::read_to_string(&file) {
@@ -172,6 +188,10 @@ impl Config {
     }
 
     /// Writes beside and renames, so a crash never leaves half a file.
+    ///
+    /// # Errors
+    ///
+    /// Fails when the config directory or file cannot be written or renamed into place.
     pub fn save(&self, paths: &Paths) -> Result<()> {
         let file = paths.config_file();
         std::fs::create_dir_all(&paths.config)
@@ -187,6 +207,10 @@ impl Config {
 
     /// Every entry validated; the first bad one fails the whole file, so a typo
     /// never silently drops a repo from the sync.
+    ///
+    /// # Errors
+    ///
+    /// Fails when any entry is invalid, or two entries list the same path.
     pub fn repos(&self, paths: &Paths) -> Result<Vec<Repo>> {
         let mut out: Vec<Repo> = Vec::new();
         for e in &self.repo {

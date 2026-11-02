@@ -115,5 +115,8 @@ fn place_under(window: &WebviewWindow, icon: &Rect) -> tauri::Result<()> {
         screen.as_ref(),
         GAP * scale,
     );
-    window.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32))
+    // Screen coordinates are far inside i32; the f64s come from them.
+    #[allow(clippy::cast_possible_truncation)]
+    let position = PhysicalPosition::new(x.round() as i32, y.round() as i32);
+    window.set_position(position)
 }

@@ -240,6 +240,8 @@ impl Sandbox {
         sync::sync_repo(&self.ctx(false), repo, explicit).unwrap()
     }
 
+    // A method like the other helpers, so the 25 call sites read `s.head(..)`.
+    #[allow(clippy::unused_self)]
     pub fn head(&self, dir: &Path) -> String {
         git(dir, &["rev-parse", "HEAD"])
     }

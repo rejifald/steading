@@ -25,6 +25,10 @@ pub struct AddOpts {
 
 /// Lists a repo. A new or empty `mirror` path is cloned here; anything else
 /// must already be a main clone whose remote has the branch.
+///
+/// # Errors
+///
+/// Fails when the config cannot be read or saved, the path is already listed, a `--gate`, `--after` or `--interval` is invalid, concord's clone is listed without a gate, a mirror clone fails, the clone is not a main clone whose remote has the branch, or an existing clone cannot become a mirror.
 pub fn add(ctx: &Ctx, opts: &AddOpts) -> Result<Repo> {
     let path = absolute(&ctx.paths.expand(&opts.path.to_string_lossy()));
     let shown = ctx.paths.tilde(&path);
@@ -105,6 +109,10 @@ pub fn add(ctx: &Ctx, opts: &AddOpts) -> Result<Repo> {
 
 /// Rule 8, second half: everything an existing clone holds that a mirror sync
 /// would lose. Fetches the remote first so "missing from the remote" is current.
+///
+/// # Errors
+///
+/// Fails when a git command used to inspect or fetch the clone fails.
 pub fn adoption_blockers(ctx: &Ctx, repo: &Repo) -> Result<Vec<String>> {
     let dir = &repo.path;
     let mut found = Vec::new();
@@ -120,8 +128,7 @@ pub fn adoption_blockers(ctx: &Ctx, repo: &Repo) -> Result<Vec<String>> {
     if ctx.resolve(dir, "refs/stash").is_some() {
         let n = ctx
             .read(dir, &["stash", "list"])
-            .map(|s| s.lines().count())
-            .unwrap_or(1);
+            .map_or(1, |s| s.lines().count());
         found.push(format!(
             "{n} stash entr{}",
             if n == 1 { "y" } else { "ies" }
@@ -162,6 +169,10 @@ pub fn adoption_blockers(ctx: &Ctx, repo: &Repo) -> Result<Vec<String>> {
 }
 
 /// Unlists a repo. The clone itself is left exactly as it is.
+///
+/// # Errors
+///
+/// Fails when the config cannot be read, validated or saved, or the repo's record cannot be dropped.
 pub fn remove(ctx: &Ctx, selector: &str) -> Result<Option<String>> {
     let mut cfg = ctx.config()?;
     let repos = cfg.repos(&ctx.paths)?;
@@ -176,6 +187,10 @@ pub fn remove(ctx: &Ctx, selector: &str) -> Result<Option<String>> {
 
 /// Sets how often a listed repo is polled. The new interval applies from its
 /// next due check; nothing is synced here.
+///
+/// # Errors
+///
+/// Fails when `interval` is not valid, or the config cannot be read, validated or saved.
 pub fn set_interval(ctx: &Ctx, selector: &str, interval: &str) -> Result<Option<String>> {
     config::parse_interval(interval)?;
     let mut cfg = ctx.config()?;

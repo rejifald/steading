@@ -14,6 +14,7 @@ use crate::inspect::{Health, Reason};
 use crate::sync::{Outcome, Poll, short};
 
 /// A mirror whose path is missing or an empty directory is cloned, not synced.
+#[must_use]
 pub fn needs_fresh_clone(path: &Path) -> bool {
     match std::fs::read_dir(path) {
         Ok(mut entries) => entries.next().is_none(),
@@ -23,6 +24,10 @@ pub fn needs_fresh_clone(path: &Path) -> bool {
 
 /// Rule 8, first half: `git clone --depth 1 --single-branch` into a new or
 /// empty path, from the entry's `url`.
+///
+/// # Errors
+///
+/// Fails with a [`Reason`] when the entry has no `url`, the parent directory cannot be created, or the clone fails.
 pub fn clone_fresh(ctx: &Ctx, repo: &Repo, out: &mut Outcome) -> Result<(), Reason> {
     let Some(url) = &repo.url else {
         return Err(Reason::NotAClone {
@@ -73,6 +78,10 @@ pub fn clone_fresh(ctx: &Ctx, repo: &Repo, out: &mut Outcome) -> Result<(), Reas
 /// Makes the clone exactly the remote tip: `reset --hard` (or a forced
 /// checkout when HEAD is elsewhere) and `clean -ffdx`, then, when the tip
 /// moved, drops the reflog and other refs and runs `git gc` (rule 9).
+///
+/// # Errors
+///
+/// Fails with a [`Reason`] when the clone cannot be read, saved as a patch, reset, cleaned or pruned.
 pub fn apply(ctx: &Ctx, repo: &Repo, poll: &Poll, out: &mut Outcome) -> Result<(), Reason> {
     let dir = &repo.path;
     let failed = |e: anyhow::Error| Reason::NotAClone {

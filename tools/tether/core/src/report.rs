@@ -2,6 +2,8 @@
 //! and its state. Read-only and offline: it judges against the
 //! remote-tracking ref, and keeps a network failure the last sync recorded.
 
+use std::fmt::Write as _;
+
 use serde::Serialize;
 
 use crate::config::{Mode, Repo};
@@ -51,6 +53,9 @@ pub struct Report {
     pub repos: Vec<Row>,
 }
 
+/// # Errors
+///
+/// Fails when the config cannot be read or validated.
 pub fn report(ctx: &Ctx) -> anyhow::Result<Report> {
     let repos = ctx.config()?.repos(&ctx.paths)?;
     let records = record::load(&ctx.paths);
@@ -117,9 +122,8 @@ fn commits_to_pull(ctx: &Ctx, repo: &Repo) -> Option<usize> {
     if local == tip {
         return None;
     }
-    let count = inspect::ahead_behind(ctx, &repo.path, &local, &tip)
-        .map(|(_, behind)| behind)
-        .unwrap_or(0);
+    let count =
+        inspect::ahead_behind(ctx, &repo.path, &local, &tip).map_or(0, |(_, behind)| behind);
     match repo.mode {
         Mode::Follow => (count > 0).then_some(count),
         Mode::Mirror => Some(count.max(1)),
@@ -169,6 +173,7 @@ fn local_reason(ctx: &Ctx, repo: &Repo) -> Option<Reason> {
 }
 
 /// Human-readable `status`.
+#[must_use]
 pub fn render(r: &Report) -> String {
     let mut out = String::new();
     let head = if r.paused {
@@ -182,33 +187,36 @@ pub fn render(r: &Report) -> String {
         out.push_str("  no repos listed; add one with `git tether add <path> --branch <branch>`\n");
     }
     for row in &r.repos {
-        out.push_str(&format!(
-            "  {:<10} {}  {} ({}, every {})  last sync {}\n",
+        let _ = writeln!(
+            out,
+            "  {:<10} {}  {} ({}, every {})  last sync {}",
             row.health.label(),
             row.path,
             row.branch,
             row.mode.label(),
             human_interval(row.interval_seconds),
             row.last_sync.as_deref().unwrap_or("never"),
-        ));
+        );
         if let Some(why) = row.reason_text() {
-            out.push_str(&format!("             {why}\n"));
+            let _ = writeln!(out, "             {why}");
         }
         if let Some(hint) = &row.hint {
-            out.push_str(&format!("             {hint}\n"));
+            let _ = writeln!(out, "             {hint}");
         }
         if let Some(n) = row.behind {
-            out.push_str(&format!("             {}\n", pending_text(n)));
+            let _ = writeln!(out, "             {}", pending_text(n));
         }
     }
     out
 }
 
 /// The detail line under a *behind* row, in `status` and the tray.
+#[must_use]
 pub fn pending_text(commits: usize) -> String {
     format!("{commits} commit(s) to pull on the next sync")
 }
 
+#[must_use]
 pub fn human_interval(secs: u64) -> String {
     match secs {
         s if s % 3600 == 0 => format!("{}h", s / 3600),

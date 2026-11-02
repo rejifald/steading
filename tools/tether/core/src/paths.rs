@@ -25,23 +25,25 @@ pub struct Paths {
 }
 
 impl Paths {
+    /// # Errors
+    ///
+    /// Fails when `HOME` is not set.
     pub fn from_env() -> Result<Self> {
         let home = PathBuf::from(std::env::var("HOME").context("HOME is not set")?);
         let var = |name: &str| std::env::var_os(name).filter(|v| !v.is_empty());
         Ok(Self {
             config: var("TETHER_CONFIG_DIR")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(".config/tether")),
+                .map_or_else(|| home.join(".config/tether"), PathBuf::from),
             concord_repo: var("TETHER_CONCORD_REPO_DIR")
                 .or_else(|| var("CONCORD_REPO_DIR"))
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home.join(DEFAULT_CONCORD_REPO)),
+                .map_or_else(|| home.join(DEFAULT_CONCORD_REPO), PathBuf::from),
             git: var("TETHER_GIT").unwrap_or_else(|| "git".into()),
             home,
         })
     }
 
     /// Explicit construction for tests: concord's clone at its default place.
+    #[must_use]
     pub fn new(home: &Path, config: &Path) -> Self {
         Self {
             home: home.to_path_buf(),
@@ -51,17 +53,20 @@ impl Paths {
         }
     }
 
+    #[must_use]
     pub fn config_file(&self) -> PathBuf {
         self.config.join("repos.toml")
     }
 
     /// Last result per repo (`record`), so `status` and the tray can say when
     /// a repo last synced and why it was skipped.
+    #[must_use]
     pub fn state_file(&self) -> PathBuf {
         self.config.join("state.json")
     }
 
     /// Rule 9: `backups/<repo>/<timestamp>.diff`.
+    #[must_use]
     pub fn backups(&self, repo_name: &str) -> PathBuf {
         self.config.join("backups").join(repo_name)
     }
@@ -71,6 +76,7 @@ impl Paths {
     /// rule 3). Keyed by the repo as listed (`key`, escaped into one file name):
     /// it lives here, not in the clone, because it is taken before the gate,
     /// which runs before any git command, and before a mirror is cloned.
+    #[must_use]
     pub fn after_lock(&self, key: &str) -> PathBuf {
         let name = key.replace('%', "%25").replace('/', "%2F");
         self.config.join("after-locks").join(format!("{name}.lock"))
@@ -78,14 +84,19 @@ impl Paths {
 
     /// Present while background sync is paused (menu *Pause*, `git tether pause`);
     /// the tray's timers and `git tether sync --due` both honour it.
+    #[must_use]
     pub fn pause_file(&self) -> PathBuf {
         self.config.join("paused")
     }
 
+    #[must_use]
     pub fn is_paused(&self) -> bool {
         self.pause_file().exists()
     }
 
+    /// # Errors
+    ///
+    /// Fails when the pause file cannot be written or removed.
     pub fn set_paused(&self, paused: bool) -> std::io::Result<()> {
         if paused {
             std::fs::create_dir_all(&self.config)?;
@@ -99,6 +110,7 @@ impl Paths {
     }
 
     /// concord counts as installed when its app or its login item is present.
+    #[must_use]
     pub fn concord_installed(&self) -> bool {
         self.home.join("Applications/concord.app").exists()
             || self
@@ -108,6 +120,7 @@ impl Paths {
     }
 
     /// `path` with `$HOME` shown as `~`, for the config file and messages.
+    #[must_use]
     pub fn tilde(&self, path: &Path) -> String {
         match path.strip_prefix(&self.home) {
             Ok(rest) if rest.as_os_str().is_empty() => "~".into(),
@@ -117,6 +130,7 @@ impl Paths {
     }
 
     /// The inverse of [`Paths::tilde`]: `~/x` is under `$HOME`.
+    #[must_use]
     pub fn expand(&self, path: &str) -> PathBuf {
         match path.strip_prefix("~/") {
             Some(rest) => self.home.join(rest),

@@ -50,12 +50,14 @@ impl Outcome {
         }
     }
 
+    #[must_use]
     pub fn skip(mut self, reason: Reason) -> Self {
         self.health = reason.health();
         self.reason = Some(reason);
         self
     }
 
+    #[must_use]
     pub fn describe(&self) -> String {
         match (&self.reason, &self.moved) {
             (Some(r), _) => format!("{}: {}", self.health.label(), r),
@@ -66,6 +68,7 @@ impl Outcome {
     }
 }
 
+#[must_use]
 pub fn short(sha: &str) -> &str {
     &sha[..sha.len().min(9)]
 }
@@ -83,6 +86,10 @@ pub struct Poll {
 
 /// Rule 3: `ls-remote`, and fetch only when the remote tip differs from the
 /// remote-tracking ref. `depth` is `Some(1)` for a mirror.
+///
+/// # Errors
+///
+/// Fails with a [`Reason`] when the remote branch is missing, the remote cannot be reached, or the fetch fails.
 pub fn poll(ctx: &Ctx, repo: &Repo, depth: Option<u32>) -> Result<Poll, Reason> {
     let dir = &repo.path;
     let tip = match git::ls_remote(&ctx.paths.git, dir, &repo.remote, &repo.branch) {
@@ -159,6 +166,10 @@ impl Trigger {
 }
 
 /// Syncs one repo and records the result.
+///
+/// # Errors
+///
+/// Fails when a lock cannot be taken or the record cannot be saved; a repo that is skipped is an `Ok` outcome.
 pub fn sync_repo(ctx: &Ctx, repo: &Repo, trigger: Trigger) -> Result<Outcome> {
     let mut out = Outcome::new(ctx, repo);
     // Held until the record is saved: `after_failed` is read here and written
@@ -201,19 +212,22 @@ pub fn sync_repo(ctx: &Ctx, repo: &Repo, trigger: Trigger) -> Result<Outcome> {
     Ok(out)
 }
 
-/// The per-repo `after` lock ([`crate::paths::Paths::after_lock`]): `Some(None)`
-/// when the repo has no `after` or this is a dry run, `None` when another run
-/// still holds it after the trigger's wait.
-fn lock_after(
-    ctx: &Ctx,
-    repo: &Repo,
-    key: &str,
-    trigger: Trigger,
-) -> Result<Option<Option<lock::Lock>>> {
+/// Holds the per-repo `after` lock, if one was needed, until dropped.
+struct AfterLock {
+    _held: Option<lock::Lock>,
+}
+
+/// The per-repo `after` lock ([`crate::paths::Paths::after_lock`]): a guard that
+/// holds nothing when the repo has no `after` or this is a dry run, `None` when
+/// another run still holds it after the trigger's wait.
+fn lock_after(ctx: &Ctx, repo: &Repo, key: &str, trigger: Trigger) -> Result<Option<AfterLock>> {
     if repo.after.is_none() || ctx.dry_run {
-        return Ok(Some(None));
+        return Ok(Some(AfterLock { _held: None }));
     }
-    Ok(lock::acquire_file(&ctx.paths.after_lock(key), trigger.wait())?.map(Some))
+    Ok(
+        lock::acquire_file(&ctx.paths.after_lock(key), trigger.wait())?
+            .map(|held| AfterLock { _held: Some(held) }),
+    )
 }
 
 /// ADR 0004 rule 2: a background sync goes ahead only when the gate exits 0
@@ -364,6 +378,10 @@ pub fn is_due(ctx: &Ctx, repo: &Repo, records: &record::Records) -> bool {
 
 /// The background tick (`git tether sync --due`): every due repo, never waiting
 /// for a lock. Pause stops it entirely.
+///
+/// # Errors
+///
+/// Fails when the config cannot be read or a repo's sync fails to save its record.
 pub fn tick(ctx: &Ctx) -> Result<Vec<Outcome>> {
     if ctx.paths.is_paused() {
         return Ok(Vec::new());

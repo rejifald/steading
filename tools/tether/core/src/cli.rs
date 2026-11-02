@@ -165,7 +165,7 @@ fn dispatch(cmd: Cmd) -> Result<i32> {
             dry_run,
             due,
             json,
-        } => sync_cmd(paths, repo, dry_run, due, json),
+        } => sync_cmd(paths, repo.as_deref(), dry_run, due, json),
         Cmd::Add {
             path,
             branch,
@@ -222,7 +222,7 @@ fn dispatch(cmd: Cmd) -> Result<i32> {
 
 fn sync_cmd(
     paths: Paths,
-    selector: Option<String>,
+    selector: Option<&str>,
     dry_run: bool,
     due: bool,
     json: bool,
@@ -232,14 +232,14 @@ fn sync_cmd(
         sync::tick(&ctx)?
     } else {
         let repos = ctx.config()?.repos(&ctx.paths)?;
-        let chosen: Vec<_> = match &selector {
+        let chosen: Vec<_> = match selector {
             Some(s) => repos
                 .into_iter()
                 .filter(|r| r.matches(s, &ctx.paths))
                 .collect(),
             None => repos,
         };
-        if let (Some(s), true) = (&selector, chosen.is_empty()) {
+        if let (Some(s), true) = (selector, chosen.is_empty()) {
             return Err(UsageError(format!("{s} is not listed in repos.toml")).into());
         }
         chosen

@@ -20,18 +20,27 @@ pub struct Lock {
 }
 
 /// The lock file inside the clone's common git dir (`git_dir`).
+#[must_use]
 pub fn path(git_dir: &Path) -> PathBuf {
     git_dir.join("tether.lock")
 }
 
 /// Takes the lock, waiting up to `wait` for another run to finish; `None`
 /// when it is still held after that. A zero `wait` tries once.
+///
+/// # Errors
+///
+/// Fails when the lock file cannot be created, opened or locked.
 pub fn acquire(git_dir: &Path, wait: Duration) -> Result<Option<Lock>> {
     acquire_file(&path(git_dir), wait)
 }
 
 /// [`acquire`] on any lock file, for tether's own locks that are not the
 /// shared contract (the per-repo `after` lock in [`crate::paths::Paths::after_lock`]).
+///
+/// # Errors
+///
+/// Fails when the lock file cannot be created, opened or locked.
 pub fn acquire_file(p: &Path, wait: Duration) -> Result<Option<Lock>> {
     if let Some(dir) = p.parent() {
         std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
@@ -47,7 +56,7 @@ pub fn acquire_file(p: &Path, wait: Duration) -> Result<Option<Lock>> {
         match file.try_lock() {
             Ok(()) => return Ok(Some(Lock { _file: file })),
             Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(100))
+                std::thread::sleep(Duration::from_millis(100));
             }
             Err(TryLockError::WouldBlock) => return Ok(None),
             Err(TryLockError::Error(e)) => {

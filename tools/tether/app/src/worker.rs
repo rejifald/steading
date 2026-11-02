@@ -31,7 +31,7 @@ const COALESCE: Duration = Duration::from_millis(300);
 /// *Sync now* waits this long for another run (the CLI) to release a clone.
 const EXPLICIT_WAIT: Duration = Duration::from_secs(10);
 
-pub fn run(app: AppHandle, state: Arc<State>, rx: Receiver<Event>) {
+pub fn run(app: &AppHandle, state: &Arc<State>, rx: &Receiver<Event>) {
     // Seeded from the last recorded results, so a restart does not re-notify
     // a repo that was already *needs you*.
     let mut prev: HashMap<String, Health> = record::load(&state.paths)
@@ -54,7 +54,7 @@ pub fn run(app: AppHandle, state: Arc<State>, rx: Receiver<Event>) {
             }
         }
         *state.note.lock().unwrap() = None;
-        let outcomes = run_due_and_requested(&app, &state, &pending);
+        let outcomes = run_due_and_requested(app, state, &pending);
         for o in outcomes.iter().filter(|o| o.discarded) {
             let saved = o
                 .backup
@@ -66,7 +66,7 @@ pub fn run(app: AppHandle, state: Arc<State>, rx: Receiver<Event>) {
                 &format!("{}: mirror reset to its branch tip{saved}", o.path),
             );
         }
-        refresh(&app, &state, &mut prev);
+        refresh(app, state, &mut prev);
     }
 }
 
@@ -124,7 +124,8 @@ fn run_due_and_requested(app: &AppHandle, state: &Arc<State>, pending: &Pending)
         match sync::sync_repo(&ctx, r, trigger) {
             Ok(o) => outs.push(o),
             Err(e) => {
-                *state.note.lock().unwrap() = Some(format!("{}: {e:#}", state.paths.tilde(&r.path)))
+                *state.note.lock().unwrap() =
+                    Some(format!("{}: {e:#}", state.paths.tilde(&r.path)));
             }
         }
     }

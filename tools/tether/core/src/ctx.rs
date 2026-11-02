@@ -28,6 +28,7 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    #[must_use]
     pub fn new(paths: Paths, dry_run: bool) -> Self {
         Self {
             paths,
@@ -37,6 +38,9 @@ impl Ctx {
         }
     }
 
+    /// # Errors
+    ///
+    /// Fails when the config cannot be loaded.
     pub fn config(&self) -> Result<Config> {
         Config::load(&self.paths)
     }
@@ -49,6 +53,9 @@ impl Ctx {
         std::mem::take(&mut self.log.borrow_mut())
     }
 
+    /// # Errors
+    ///
+    /// Fails when git cannot be run or exits non-zero.
     pub fn read(&self, dir: &Path, args: &[&str]) -> Result<String> {
         git::run(&self.paths.git, dir, args)
     }
@@ -63,6 +70,10 @@ impl Ctx {
 
     /// A mutating git command: logged, and only printed in a dry run. Returns
     /// the raw output (a dry run returns `None`) so callers can read a refusal.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git cannot be run.
     pub fn write_output(&self, dir: &Path, args: &[&str]) -> Result<Option<Output>> {
         let shown = format!("git -C {} {}", self.paths.tilde(dir), args.join(" "));
         if self.dry_run {
@@ -74,6 +85,10 @@ impl Ctx {
     }
 
     /// Like [`Ctx::write_output`] but a non-zero exit is an error.
+    ///
+    /// # Errors
+    ///
+    /// Fails when git cannot be run or exits non-zero; a dry run never fails.
     pub fn write(&self, dir: &Path, args: &[&str]) -> Result<()> {
         if let Some(out) = self.write_output(dir, args)?
             && !out.status.success()

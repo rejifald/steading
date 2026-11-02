@@ -35,11 +35,13 @@ pub struct Ran {
 }
 
 impl Ran {
+    #[must_use]
     pub fn is_success(&self) -> bool {
         matches!(&self.end, End::Exited(s) if s.success())
     }
 
     /// The reason a failed run gives: its first line, else how it ended.
+    #[must_use]
     pub fn summary(&self) -> String {
         if let Some(line) = &self.first_line {
             return line.clone();
@@ -57,6 +59,10 @@ impl Ran {
 
 /// Runs `script` with `sh -c` in `dir` with `env` added, and waits for it, at
 /// most `timeout` when one is given. stdin is closed.
+///
+/// # Errors
+///
+/// Fails when the command cannot be started, waited for or killed, or its output cannot be read.
 pub fn run(
     script: &str,
     dir: &Path,
@@ -104,13 +110,13 @@ pub fn run(
 }
 
 fn kill_group(pid: u32) {
-    let Ok(pgid) = libc::pid_t::try_from(pid) else {
+    let Ok(group_id) = libc::pid_t::try_from(pid) else {
         return;
     };
     // SAFETY: killpg only sends a signal; the group is the child's own (it
     // was started with process_group(0)) and has not been reaped yet.
     unsafe {
-        libc::killpg(pgid, libc::SIGKILL);
+        libc::killpg(group_id, libc::SIGKILL);
     }
 }
 

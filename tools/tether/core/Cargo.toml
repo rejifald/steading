@@ -27,5 +27,5 @@ serde_json = "1"
 tempfile = "3"
 toml = "0.8"
 
-# Not on the workspace's pedantic lints yet: tether predates them, and the cleanup is its own
-# commit. TODO(rejifald): `[lints] workspace = true` once `cargo clippy` passes with it.
+[lints]
+workspace = true

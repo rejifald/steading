@@ -25,6 +25,7 @@ pub const REPO_ENV_VARS: [&str; 10] = [
     "GIT_PREFIX",
 ];
 
+#[must_use]
 pub fn command(bin: &OsStr, dir: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new(bin);
     cmd.arg("-C").arg(dir).args(args);
@@ -37,6 +38,10 @@ pub fn command(bin: &OsStr, dir: &Path, args: &[&str]) -> Command {
 }
 
 /// Runs git and returns its raw output, whatever the exit status.
+///
+/// # Errors
+///
+/// Fails when git cannot be started.
 pub fn output(bin: &OsStr, dir: &Path, args: &[&str]) -> Result<Output> {
     command(bin, dir, args)
         .output()
@@ -54,6 +59,10 @@ pub fn first_error_line(out: &Output) -> String {
 }
 
 /// Runs git, failing with its stderr on a non-zero exit; returns trimmed stdout.
+///
+/// # Errors
+///
+/// Fails when git cannot be started or exits non-zero.
 pub fn run(bin: &OsStr, dir: &Path, args: &[&str]) -> Result<String> {
     let out = output(bin, dir, args)?;
     if !out.status.success() {
@@ -68,19 +77,23 @@ pub fn run(bin: &OsStr, dir: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// True when git exits zero.
+#[must_use]
 pub fn ok(bin: &OsStr, dir: &Path, args: &[&str]) -> bool {
-    output(bin, dir, args)
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    output(bin, dir, args).is_ok_and(|o| o.status.success())
 }
 
 /// `git rev-parse` output as an absolute path (git may answer relative to `dir`).
+///
+/// # Errors
+///
+/// Fails when git cannot be started or exits non-zero.
 pub fn path_of(bin: &OsStr, dir: &Path, args: &[&str]) -> Result<PathBuf> {
     let p = PathBuf::from(run(bin, dir, args)?);
     Ok(if p.is_absolute() { p } else { dir.join(p) })
 }
 
 /// The commit `refname` points at, or `None` when it does not exist.
+#[must_use]
 pub fn resolve(bin: &OsStr, dir: &Path, refname: &str) -> Option<String> {
     run(
         bin,
@@ -96,16 +109,22 @@ pub fn resolve(bin: &OsStr, dir: &Path, refname: &str) -> Option<String> {
 }
 
 /// The branch checked out in `dir`, or `None` on a detached HEAD.
+#[must_use]
 pub fn current_branch(bin: &OsStr, dir: &Path) -> Option<String> {
     run(bin, dir, &["symbolic-ref", "--quiet", "--short", "HEAD"]).ok()
 }
 
+#[must_use]
 pub fn is_ancestor(bin: &OsStr, dir: &Path, ancestor: &str, of: &str) -> bool {
     ok(bin, dir, &["merge-base", "--is-ancestor", ancestor, of])
 }
 
 /// The tip of `branch` on `remote` by `git ls-remote` (rule 3): one request, no
 /// objects. `Ok(None)` when the remote has no such branch.
+///
+/// # Errors
+///
+/// Fails when git cannot be started or the remote cannot be reached.
 pub fn ls_remote(bin: &OsStr, dir: &Path, remote: &str, branch: &str) -> Result<Option<String>> {
     let refname = format!("refs/heads/{branch}");
     let out = output(bin, dir, &["ls-remote", "--quiet", remote, &refname])?;
@@ -121,6 +140,10 @@ pub fn ls_remote(bin: &OsStr, dir: &Path, remote: &str, branch: &str) -> Result<
 }
 
 /// Local branches, as short names.
+///
+/// # Errors
+///
+/// Fails when git cannot be started or exits non-zero.
 pub fn local_branches(bin: &OsStr, dir: &Path) -> Result<Vec<String>> {
     let out = run(
         bin,

@@ -23,6 +23,10 @@ pub enum Plan {
 }
 
 /// Decides without writing. `available` is false when `tip` was not fetched.
+///
+/// # Errors
+///
+/// Fails with the [`Reason`] the repo cannot be fast-forwarded: detached HEAD, another branch, uncommitted tracked changes, a diverged history, or an unreadable clone.
 pub fn evaluate(ctx: &Ctx, repo: &Repo, tip: &str, available: bool) -> Result<Plan, Reason> {
     let dir = &repo.path;
     match git::current_branch(&ctx.paths.git, dir) {
@@ -60,6 +64,9 @@ pub fn evaluate(ctx: &Ctx, repo: &Repo, tip: &str, available: bool) -> Result<Pl
     Err(Reason::Diverged { ahead, behind })
 }
 
+/// # Errors
+///
+/// Fails with the [`Reason`] the repo was skipped, or the fast-forward was refused.
 pub fn apply(ctx: &Ctx, repo: &Repo, poll: &Poll, out: &mut Outcome) -> Result<(), Reason> {
     match evaluate(ctx, repo, &poll.tip, poll.available)? {
         Plan::UpToDate => Ok(()),

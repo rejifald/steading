@@ -27,17 +27,23 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> 
 }
 
 #[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
 pub fn report(state: Shared<'_>) -> Snapshot {
     state.snapshot()
 }
 
 /// *Sync now* for one repo (its path as listed), or *Sync all* with `None`.
 #[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
 pub fn sync(state: Shared<'_>, path: Option<String>) {
     state.send(Event::SyncNow(path));
 }
 
 #[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
 pub fn toggle_pause(state: Shared<'_>) -> Result<(), String> {
     let result = state.paths.set_paused(!state.paths.is_paused());
     state.send(Event::Refresh);
@@ -163,6 +169,8 @@ pub async fn remove(state: Shared<'_>, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
 pub fn open_in_finder(state: Shared<'_>, path: String) -> Result<(), String> {
     Command::new("open")
         .arg(state.paths.expand(&path))
@@ -172,11 +180,15 @@ pub fn open_in_finder(state: Shared<'_>, path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
 pub fn hide(app: AppHandle) {
     window::hide(&app);
 }
 
 #[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
 pub fn quit(app: AppHandle) {
     app.exit(0);
 }

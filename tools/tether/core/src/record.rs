@@ -39,6 +39,7 @@ pub struct AfterFailed {
 }
 
 impl Record {
+    #[must_use]
     pub fn last_sync_time(&self) -> Option<DateTime<Local>> {
         DateTime::parse_from_rfc3339(&self.last_sync)
             .ok()
@@ -48,6 +49,7 @@ impl Record {
 
 pub type Records = BTreeMap<String, Record>;
 
+#[must_use]
 pub fn load(paths: &Paths) -> Records {
     // A missing or unreadable file only loses "last sync" times: every repo is
     // then due, which is the safe direction.
@@ -59,6 +61,10 @@ pub fn load(paths: &Paths) -> Records {
 
 /// Read-modify-write under a lock on `state.lock`, so two processes syncing
 /// different repos never drop each other's record.
+///
+/// # Errors
+///
+/// Fails when the state directory or lock cannot be created, or the state file cannot be written.
 pub fn save(paths: &Paths, key: &str, record: Record) -> Result<()> {
     std::fs::create_dir_all(&paths.config)
         .with_context(|| format!("creating {}", paths.config.display()))?;
@@ -77,6 +83,10 @@ pub fn save(paths: &Paths, key: &str, record: Record) -> Result<()> {
 }
 
 /// Drops a repo's record (`git tether remove`).
+///
+/// # Errors
+///
+/// Fails when the state file cannot be written.
 pub fn forget(paths: &Paths, key: &str) -> Result<()> {
     let mut all = load(paths);
     if all.remove(key).is_some() {
@@ -91,6 +101,7 @@ fn write_atomic(file: &Path, body: &str) -> Result<()> {
     std::fs::rename(&tmp, file).with_context(|| format!("replacing {}", file.display()))
 }
 
+#[must_use]
 pub fn now() -> String {
     Local::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, false)
 }

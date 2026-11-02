@@ -82,7 +82,9 @@ pub fn next_wait(
         .map(|(r, key)| {
             due_in(
                 r,
-                records.get(key).and_then(|rec| rec.last_sync_time()),
+                records
+                    .get(key)
+                    .and_then(tether_core::record::Record::last_sync_time),
                 now,
             )
         })
@@ -351,9 +353,11 @@ mod tests {
             w: 40.0,
             h: 48.0,
         };
-        assert_eq!(
-            popover_origin(&left, (720.0, 960.0), Some(&screen), 8.0).0,
-            0.0
+        assert!(
+            popover_origin(&left, (720.0, 960.0), Some(&screen), 8.0)
+                .0
+                .abs()
+                < f64::EPSILON
         );
         // A second display to the right: clamped to its own edges.
         let second = Area {
@@ -368,9 +372,9 @@ mod tests {
             w: 40.0,
             h: 48.0,
         };
-        assert_eq!(
-            popover_origin(&icon, (720.0, 960.0), Some(&second), 8.0).0,
-            2880.0
+        assert!(
+            (popover_origin(&icon, (720.0, 960.0), Some(&second), 8.0).0 - 2880.0).abs()
+                < f64::EPSILON
         );
         assert_eq!(
             popover_origin(&left, (720.0, 960.0), None, 8.0),
