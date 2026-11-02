@@ -10,6 +10,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
+/// How long a lock that looks held is retried even with no wait. A process being spawned on any
+/// thread holds a copy of this process's descriptors, the lock's among them, until its program
+/// starts, so a lock just released can look held for some microseconds; a real holder keeps it
+/// for a whole run.
+const SPAWN_GRACE: Duration = Duration::from_millis(50);
+
+/// The pause between tries.
+const RETRY: Duration = Duration::from_millis(10);
+
 /// The locks a pass holds for as long as this lives.
 #[derive(Debug)]
 pub struct RepoLock {
@@ -17,13 +26,13 @@ pub struct RepoLock {
 }
 
 /// Takes the clone's locks, waiting up to `wait` for another run; `Ok(Err(why))` when the
-/// clone is busy after that. A zero `wait` tries once.
+/// clone is busy after that. A zero `wait` gives up after [`SPAWN_GRACE`].
 ///
 /// # Errors
 ///
 /// Fails when a lock file cannot be opened or locked for a reason other than being held.
 pub fn acquire(common_dir: &Path, wait: Duration) -> Result<Result<RepoLock, String>> {
-    let deadline = Instant::now() + wait;
+    let deadline = Instant::now() + wait.max(SPAWN_GRACE);
     let Some(reap) = take(&common_dir.join("reap.lock"), true, deadline)? else {
         return Ok(Err("another reap run holds it".into()));
     };
@@ -60,7 +69,7 @@ fn take(path: &Path, may_create: bool, deadline: Instant) -> Result<Option<File>
         match file.try_lock() {
             Ok(()) => return Ok(Some(file)),
             Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(RETRY);
             }
             Err(TryLockError::WouldBlock) => return Ok(None),
             Err(TryLockError::Error(e)) => {
@@ -74,10 +83,6 @@ fn take(path: &Path, may_create: bool, deadline: Instant) -> Result<Option<File>
 mod tests {
     use super::*;
 
-    /// A process another test forks while a lock is released holds a copy of the lock's
-    /// descriptor until its exec closes it, so a released lock can stay held for a moment.
-    const RELEASE_DELAY: Duration = Duration::from_secs(2);
-
     #[test]
     fn a_second_pass_on_the_same_clone_is_turned_away() {
         let dir = tempfile::tempdir().unwrap();
@@ -88,7 +93,7 @@ mod tests {
         assert!(first.is_ok());
         assert_eq!(second.unwrap_err(), "another reap run holds it");
         drop(first);
-        assert!(acquire(dir.path(), RELEASE_DELAY).unwrap().is_ok());
+        assert!(acquire(dir.path(), Duration::ZERO).unwrap().is_ok());
     }
 
     #[test]
@@ -99,7 +104,7 @@ mod tests {
 
         let busy = acquire(dir.path(), Duration::ZERO).unwrap();
         tether.unlock().unwrap();
-        let free = acquire(dir.path(), RELEASE_DELAY).unwrap();
+        let free = acquire(dir.path(), Duration::ZERO).unwrap();
 
         assert_eq!(busy.unwrap_err(), "git-tether is syncing it");
         assert!(free.is_ok());

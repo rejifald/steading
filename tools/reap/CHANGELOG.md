@@ -40,3 +40,9 @@ All notable changes to this project are documented in this file. The format foll
 - The popover groups worktrees by outcome across repos (*Needs you*, *Ready to remove*,
   *Merged, but held*, *In progress*, *Kept*), titles each row by its branch, says in a plain
   sentence what happens to it, and offers *Remove all* with a confirm.
+
+### Fixed
+
+- A pass could find a clone busy just after the previous one released its lock, while
+  another thread was starting a process. A lock that looks held is now retried for 50 ms,
+  even with no wait.

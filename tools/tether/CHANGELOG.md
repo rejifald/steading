@@ -41,6 +41,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- A sync could be skipped as busy just after the previous one released its lock, while
+  another thread was starting a process. A lock that looks held is now retried for 50 ms,
+  even with no wait.
 - A clone short of its remote tip showed as *in sync* in `status`, the tray and
   `sync --dry-run`. It is now *behind*, with the commits the next sync will pull
   (`behind` in `status --json`). Both modes.

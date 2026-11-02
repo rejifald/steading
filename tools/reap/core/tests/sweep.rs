@@ -10,17 +10,13 @@ use reap_core::ctx::Ctx;
 use reap_core::sweep::{self, Outcome};
 use sandbox::{Sandbox, commit, git};
 
-/// Room for a lock the previous pass released: a process another test forks at that moment
-/// holds a copy of its descriptor until its exec closes it.
-const WAIT: Duration = Duration::from_secs(2);
-
 fn later(hours: i64) -> DateTime<Utc> {
     Utc::now() + chrono::Duration::hours(hours)
 }
 
 fn sweep_at(sandbox: &Sandbox, now: DateTime<Utc>) -> Outcome {
     let ctx = Ctx::new(sandbox.paths.clone(), false);
-    let mut outcomes = sweep::sweep(&ctx, None, WAIT, now).unwrap();
+    let mut outcomes = sweep::sweep(&ctx, None, Duration::ZERO, now).unwrap();
     assert_eq!(outcomes.len(), 1);
     outcomes.remove(0)
 }
@@ -227,7 +223,9 @@ fn a_dry_run_prints_the_removal_and_changes_nothing() {
     let state_before = std::fs::read_to_string(sandbox.paths.state_file()).unwrap();
 
     let ctx = Ctx::new(sandbox.paths.clone(), true);
-    let outcome = sweep::sweep(&ctx, None, WAIT, later(25)).unwrap().remove(0);
+    let outcome = sweep::sweep(&ctx, None, Duration::ZERO, later(25))
+        .unwrap()
+        .remove(0);
 
     assert!(empty.exists());
     assert!(branch_exists(&sandbox, "empty"));
