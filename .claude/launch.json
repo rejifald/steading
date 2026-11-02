@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "tether-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "tools/tether/app/ui", "run", "dev", "--", "--port", "5173", "--strictPort"],
+      "port": 5173
+    },
+    {
+      "name": "tether-storybook",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "tools/tether/app/ui", "run", "storybook"],
+      "port": 6006
+    },
+    {
+      "name": "reap-ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "tools/reap/app/ui", "run", "dev", "--", "--port", "5174", "--strictPort"],
+      "port": 5174
+    }
+  ]
+}

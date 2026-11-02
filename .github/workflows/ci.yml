@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: CI gate
+    # Everything that runs on Linux: the repo's gates, both cores and CLIs, and both popovers.
+    # Each check is a step that still runs after an earlier one fails, so one run reports them all.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Sensitive information
+        run: scripts/check-sensitive.sh --all
+      - name: Installer syntax
+        if: ${{ !cancelled() }}
+        run: bash -n tools/tether/install.sh
+      - name: Toolchain
+        id: toolchain
+        if: ${{ !cancelled() }}
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+          rustup default stable
+          cargo --version
+          node --version
+      - name: Format
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        run: cargo fmt --all --check
+      - name: Lint (cores and CLIs)
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        run: cargo clippy -p tether-core -p reap-core --all-targets --locked -- -D warnings
+      - name: Test (cores and CLIs)
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
+        run: cargo test -p tether-core -p reap-core --locked
+      - name: tether UI
+        if: ${{ !cancelled() }}
+        working-directory: tools/tether/app/ui
+        run: npm ci && npm run typecheck && npm test -- --run && npm run build
+      - name: reap UI
+        if: ${{ !cancelled() }}
+        working-directory: tools/reap/app/ui
+        run: npm ci && npm run typecheck && npm test -- --run && npm run build
+
+  apps:
+    name: macOS apps
+    # The Tauri shells need macOS's web view. Each app embeds its built popover, so the UIs are
+    # built first; their checks run in the gate above.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+      - name: Build the popovers
+        run: |
+          npm --prefix tools/tether/app/ui ci && npm --prefix tools/tether/app/ui run build
+          npm --prefix tools/reap/app/ui ci && npm --prefix tools/reap/app/ui run build
+      - name: Lint (apps)
+        run: cargo clippy -p tether-app -p reap-app --all-targets --locked -- -D warnings
+      - name: Test (apps)
+        run: cargo test -p tether-app -p reap-app --locked

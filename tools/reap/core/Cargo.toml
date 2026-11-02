@@ -1,0 +1,30 @@
+[package]
+name = "reap-core"
+description = "Finds and removes the git worktrees whose work has merged (ADR 0001). No UI deps."
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+name = "reap_core"
+
+[[bin]]
+# The UI-free CLI, run by git as `git reap`. The tray app's `reap` binary runs the same `cli::run`.
+name = "git-reap"
+path = "src/bin/git-reap.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

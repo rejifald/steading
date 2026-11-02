@@ -1,0 +1,21 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popover",
+  "description": "The popover's commands and the one event it listens to; nothing else.",
+  "windows": ["popover"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-report",
+    "allow-refresh",
+    "allow-toggle-pause",
+    "allow-pick-folder",
+    "allow-add",
+    "allow-keep",
+    "allow-unkeep",
+    "allow-remove-now",
+    "allow-open-in-finder",
+    "allow-hide",
+    "allow-quit"
+  ]
+}

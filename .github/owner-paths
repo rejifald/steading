@@ -1,0 +1,5 @@
+.github/workflows/**
+.github/owner-paths
+lefthook.yml
+scripts/check-sensitive.sh
+tools/tether/install.sh

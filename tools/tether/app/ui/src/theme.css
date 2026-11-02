@@ -1,0 +1,124 @@
+@import "tailwindcss";
+
+/* Storybook's files are not the app: a word in them must not add a utility to its bundle.
+   Stories use only the classes the app already uses. */
+@source not "./**/*.stories.tsx";
+@source not "./ScenarioPopover.tsx";
+@source not "./popoverSteps.ts";
+@source not "../.storybook";
+
+/* Every token of docs/styleguide.md. Tailwind's own palette, radii, type scale and
+   fonts are cleared first, so a colour or size that is not a token has no utility. */
+@theme {
+  --color-*: initial;
+  --radius-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --shadow-*: initial;
+
+  --spacing: 4px;
+
+  --color-surface: #f5f5f7;
+  --color-surface-raised: #ffffff;
+  --color-surface-hover: #ebebf0;
+  --color-border: #d6d6db;
+
+  /* The text tokens: utilities `text-text`, `text-muted`, `text-faint`. */
+  --color-text: #1d1d1f;
+  --color-muted: #55555a;
+  --color-faint: #636368;
+
+  --color-accent: #0058c4;
+  --color-accent-text: #ffffff;
+  --color-focus: #2f7cf6;
+
+  --color-in-sync: #1a6e2f;
+  --color-behind: #2457b8;
+  --color-skipped: #7d5800;
+  --color-needs-you: #b13a08;
+
+  --radius-panel: 12px;
+  --radius-control: 6px;
+  --radius-full: 9999px;
+
+  --font-sans: system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
+  /* Shell commands (Gate, After) and the CLI's own error text. */
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --text-xs: 11px;
+  --text-xs--line-height: 14px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+
+  /* Anything that sits above the list: callouts, the chosen mode, menus, tooltips. Tailwind
+     inlines a theme shadow into its utility, so the two colours are variables of their own
+     (below), which the dark theme can override. */
+  --shadow-raised: 0 1px 2px var(--shadow-raised-near), 0 6px 16px var(--shadow-raised-far);
+
+  /* The progress hairline: a 40%-wide bar sweeping its track. */
+  --animate-progress: progress 1.2s ease-in-out infinite;
+  @keyframes progress {
+    from {
+      translate: -100%;
+    }
+    to {
+      translate: 250%;
+    }
+  }
+}
+
+:root {
+  --shadow-raised-near: rgb(0 0 0 / 0.08);
+  --shadow-raised-far: rgb(0 0 0 / 0.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-surface: #262628;
+    --color-surface-raised: #2f2f32;
+    --color-surface-hover: #38383b;
+    --color-border: #444448;
+
+    --color-text: #f5f5f7;
+    --color-muted: #b4b4b9;
+    --color-faint: #a3a3a8;
+
+    --color-accent: #0060df;
+    --color-accent-text: #ffffff;
+    --color-focus: #5c9dff;
+
+    --color-in-sync: #55c872;
+    --color-behind: #7aaaff;
+    --color-skipped: #e0b23c;
+    --color-needs-you: #ff8f55;
+
+    --shadow-raised-near: rgb(0 0 0 / 0.5);
+    --shadow-raised-far: rgb(0 0 0 / 0.28);
+  }
+}
+
+/* The window is transparent; only the panel paints. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  cursor: default;
+}
+
+/* Base UI injects these as a <style> tag; main.tsx turns that off (CSPProvider) so the
+   content security policy needs no 'unsafe-inline', and they live here instead. */
+.base-ui-disable-scrollbar {
+  scrollbar-width: none;
+}
+.base-ui-disable-scrollbar::-webkit-scrollbar {
+  display: none;
+}

@@ -1,0 +1,23 @@
+pre-commit:
+  parallel: false
+  commands:
+    sensitive:
+      run: scripts/check-sensitive.sh --staged
+    format:
+      glob: "*.rs"
+      run: cargo fmt --all --check
+    clippy:
+      glob: "*.rs"
+      run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+commit-msg:
+  commands:
+    sensitive:
+      run: scripts/check-sensitive.sh --message {1}
+
+pre-push:
+  commands:
+    sensitive:
+      run: scripts/check-sensitive.sh --all
+    test:
+      run: cargo test --workspace --locked

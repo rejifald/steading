@@ -1,0 +1,31 @@
+[package]
+name = "tether-core"
+description = "Keeps the repos an operator lists on their branch tip (ADR 0001): poll, follow, mirror"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+name = "tether_core"
+
+[[bin]]
+# The UI-free CLI, run by git as `git tether`. The tray app's `tether` binary runs the same `cli::run`.
+name = "git-tether"
+path = "src/bin/git-tether.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+clap = { version = "4", features = ["derive"] }
+# killpg: a gate that times out is killed with everything it started.
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# The unlinked file a gate or `after` command writes its output to.
+tempfile = "3"
+toml = "0.8"
+
+# Not on the workspace's pedantic lints yet: tether predates them, and the cleanup is its own
+# commit. TODO(rejifald): `[lints] workspace = true` once `cargo clippy` passes with it.
