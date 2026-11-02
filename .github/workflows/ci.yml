@@ -32,9 +32,9 @@ jobs:
       - name: Toolchain
         id: toolchain
         if: ${{ !cancelled() }}
+        # rust-toolchain.toml names the version and components; this installs exactly that.
         run: |
-          rustup toolchain install stable --profile minimal --component clippy --component rustfmt
-          rustup default stable
+          rustup toolchain install
           cargo --version
           node --version
       - name: Format
@@ -65,8 +65,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Toolchain
         run: |
-          rustup toolchain install stable --profile minimal --component clippy
-          rustup default stable
+          rustup toolchain install
+          cargo --version
       - name: Build the popovers
         run: |
           npm --prefix tools/tether/app/ui ci && npm --prefix tools/tether/app/ui run build

@@ -41,6 +41,7 @@ then into a crate or package named for what it does (never `common` or `shared`)
 | `tools/<tool>/docs/` | The tool's ADRs, styleguide, brand and design notes. |
 | `docs/adr/` | Decisions that cover the whole repository. |
 | `scripts/` | Repo gates and the SVG renderer both tools' icon scripts use. |
+| `rust-toolchain.toml` | The one Rust version every clone and CI build with; raising it is its own commit. |
 
 ## Commits
 

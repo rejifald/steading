@@ -291,12 +291,18 @@ mod tests {
             flips(&mut prev, &report(vec![row("~/a", Health::NeedsYou)])).is_empty(),
             "still stuck: no repeat"
         );
-        assert!(flips(&mut prev, &report(vec![row("~/a", Health::InSync)])).is_empty());
+        assert_eq!(
+            flips(&mut prev, &report(vec![row("~/a", Health::InSync)])),
+            Vec::<(String, String)>::new()
+        );
         assert_eq!(
             flips(&mut prev, &report(vec![row("~/a", Health::NeedsYou)]))[0].1,
             "HEAD is detached. Check out main and tether resumes."
         );
-        assert!(flips(&mut prev, &report(vec![row("~/a", Health::Skipped)])).is_empty());
+        assert_eq!(
+            flips(&mut prev, &report(vec![row("~/a", Health::Skipped)])),
+            Vec::<(String, String)>::new()
+        );
     }
 
     #[test]

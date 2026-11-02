@@ -1,0 +1,6 @@
+# One toolchain for every clone and CI, so a new stable release cannot fail CI with no change
+# here. Raising it is a commit of its own, with whatever its new lints ask for.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
