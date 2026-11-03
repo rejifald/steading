@@ -1,10 +1,11 @@
 import { Tooltip } from "@base-ui/react/tooltip";
 import { useState, type FocusEvent } from "react";
 
-import type { Row } from "../api";
-import { FolderIcon, SlidersIcon, RefreshIcon } from "@steading/tray-popover/controls/icons";
+import { FolderIcon, RefreshIcon, SlidersIcon } from "@steading/tray-popover/controls/icons";
 import { IconButton } from "@steading/tray-popover/controls/IconButton";
 import { ProgressLine } from "@steading/tray-popover/ProgressLine";
+
+import type { Row } from "../api";
 import { RepoLine } from "../RepoLine";
 import { ago } from "./ago";
 

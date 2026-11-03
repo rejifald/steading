@@ -1,14 +1,15 @@
 import type { ComponentType, SVGProps } from "react";
 
-import type { Health } from "./api";
 import {
   ArrowDownToLineIcon,
   CheckCircleIcon,
-  WarningIcon,
-  PauseCircleIcon,
   MinusCircleIcon,
+  PauseCircleIcon,
   SpinnerIcon,
+  WarningIcon,
 } from "@steading/tray-popover/controls/icons";
+
+import type { Health } from "./api";
 
 /** The CLI's words for each state (tether-core `Health::label`). */
 export const STATE_LABELS: Record<Health, string> = {

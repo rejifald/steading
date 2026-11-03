@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 
-import type { Health, Mode } from "./api";
 import { DashedCircleIcon } from "@steading/tray-popover/controls/icons";
+
+import type { Health, Mode } from "./api";
 import { GLYPHS, GLYPH_CLASSES, StateLabel, glyphOf } from "./StateLabel";
 
 interface RepoLineProps {

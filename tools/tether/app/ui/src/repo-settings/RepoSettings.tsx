@@ -1,9 +1,10 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 
-import type { Row, TetherApi } from "../api";
 import { Callout } from "@steading/tray-popover/Callout";
 import { WarningIcon } from "@steading/tray-popover/controls/icons";
 import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
+import type { Row, TetherApi } from "../api";
 import { IntervalSelect } from "../interval/IntervalSelect";
 import { choiceOf, choicesFor } from "../interval/intervals";
 import { ago } from "../repo-list/ago";

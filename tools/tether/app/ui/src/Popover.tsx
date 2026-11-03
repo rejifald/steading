@@ -1,7 +1,8 @@
+import { useCallback, useEffect, useState } from "react";
+
 import { NoticeStrip } from "@steading/tray-popover/NoticeStrip";
 import { PopoverFrame } from "@steading/tray-popover/PopoverFrame";
 import { ReadError } from "@steading/tray-popover/ReadError";
-import { useCallback, useEffect, useState } from "react";
 
 import { AddForm } from "./add-form/AddForm";
 import type { Snapshot, TetherApi } from "./api";

@@ -2,13 +2,14 @@ import { Field } from "@base-ui/react/field";
 import { RadioGroup } from "@base-ui/react/radio-group";
 import { useEffect, useId, useState, type FormEvent } from "react";
 
-import type { AddRequest, Mode, TetherApi } from "../api";
 import { Callout } from "@steading/tray-popover/Callout";
 import { WarningIcon } from "@steading/tray-popover/controls/icons";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
+import type { AddRequest, Mode, TetherApi } from "../api";
 import { IntervalSelect } from "../interval/IntervalSelect";
 import { DEFAULT_INTERVAL_SECONDS, PRESETS, choiceOf } from "../interval/intervals";
 import { RepoLine } from "../RepoLine";
-import { TextButton } from "@steading/tray-popover/controls/TextButton";
 import { ModeOption } from "./ModeOption";
 
 const MODES: { value: Mode; label: string; hint: string }[] = [

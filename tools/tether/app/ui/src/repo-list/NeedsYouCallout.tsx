@@ -1,8 +1,9 @@
-import type { Row } from "../api";
 import { Callout } from "@steading/tray-popover/Callout";
 import { IconButton } from "@steading/tray-popover/controls/IconButton";
-import { CrossIcon, WarningIcon, SlidersIcon } from "@steading/tray-popover/controls/icons";
+import { CrossIcon, SlidersIcon, WarningIcon } from "@steading/tray-popover/controls/icons";
 import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
+import type { Row } from "../api";
 import { ago } from "./ago";
 
 /** Reasons only a sync can clear, so Sync now leads (tether-core `report::is_remote_side`). */
