@@ -1,11 +1,12 @@
-import { Tooltip } from "@base-ui/react/tooltip";
+import { NoticeStrip } from "@steading/tray-popover/NoticeStrip";
+import { PopoverFrame } from "@steading/tray-popover/PopoverFrame";
+import { ReadError } from "@steading/tray-popover/ReadError";
 import { useCallback, useEffect, useState } from "react";
 
 import { AddForm } from "./add-form/AddForm";
 import type { ReapApi, Snapshot, WorktreeAction } from "./api";
 import { Footer } from "./Footer";
 import { Header } from "./Header";
-import { ReadError } from "./ReadError";
 import { LoadingRows } from "./worktree-list/LoadingRows";
 import { WorktreeList } from "./worktree-list/WorktreeList";
 
@@ -19,7 +20,6 @@ const ACTIONS: Record<WorktreeAction, (api: ReapApi, path: string) => Promise<vo
 
 /** How often "3 min ago" is recomputed while the popover is open. */
 const CLOCK_TICK = 30_000;
-const TOOLTIP_DELAY = 400;
 
 /** The whole tray window: header, the worktree list or the add form, footer. */
 export function Popover({ api }: { api: ReapApi }) {
@@ -86,7 +86,16 @@ export function Popover({ api }: { api: ReapApi }) {
         </>
       );
     }
-    if (readError) return <ReadError message={readError} onRetry={() => void retry()} />;
+    if (readError) {
+      return (
+        <ReadError
+          title="Cannot read repos.toml"
+          message={readError}
+          hint="Fix the file, then try again. Nothing is checked until it reads."
+          onRetry={() => void retry()}
+        />
+      );
+    }
     return (
       <>
         <WorktreeList
@@ -108,21 +117,15 @@ export function Popover({ api }: { api: ReapApi }) {
   })();
 
   return (
-    <Tooltip.Provider delay={TOOLTIP_DELAY}>
-      <main className="flex h-full max-h-full flex-col overflow-hidden rounded-panel border border-border bg-surface text-sm text-text">
+    <PopoverFrame>
         <Header
           snapshot={snapshot}
           {...(view === "add" ? { title: "Add repository", showState: false } : {})}
           {...(view === "list" && isEmptyList ? { showState: false } : {})}
         />
-        {notice && (
-          <p role="alert" className="border-b border-border px-4 py-2 text-xs text-needs-you">
-            {notice}
-          </p>
-        )}
+        <NoticeStrip text={notice} />
         {body}
-      </main>
-    </Tooltip.Provider>
+    </PopoverFrame>
   );
 }
 

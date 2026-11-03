@@ -9,9 +9,9 @@ export function ProgressLine({ inset = false }: ProgressLineProps) {
   return (
     <span
       aria-hidden="true"
-      className={`pointer-events-none absolute h-0.5 overflow-hidden rounded-full bg-behind/25 ${place}`}
+      className={`pointer-events-none absolute h-0.5 overflow-hidden rounded-full bg-progress/25 ${place}`}
     >
-      <span className="block h-full w-2/5 animate-progress rounded-full bg-behind motion-reduce:animate-none" />
+      <span className="block h-full w-2/5 animate-progress rounded-full bg-progress motion-reduce:animate-none" />
     </span>
   );
 }

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { Callout } from "./Callout";
-import { NeedsYouIcon } from "./controls/icons";
+import { WarningIcon } from "./controls/icons";
 import { TextButton } from "./controls/TextButton";
 
 const meta = {
@@ -13,7 +13,7 @@ const meta = {
     tone: "needs-you",
     heading: (
       <>
-        <NeedsYouIcon className="shrink-0 text-needs-you" />
+        <WarningIcon className="shrink-0 text-needs-you" />
         <span className="font-medium">Not added</span>
       </>
     ),

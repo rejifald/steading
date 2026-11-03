@@ -2,13 +2,13 @@ import type { ComponentType, SVGProps } from "react";
 
 import type { Health } from "./api";
 import {
-  BehindIcon,
-  InSyncIcon,
-  NeedsYouIcon,
-  PausedIcon,
-  SkippedIcon,
-  SyncingIcon,
-} from "./controls/icons";
+  ArrowDownToLineIcon,
+  CheckCircleIcon,
+  WarningIcon,
+  PauseCircleIcon,
+  MinusCircleIcon,
+  SpinnerIcon,
+} from "@steading/tray-popover/controls/icons";
 
 /** The CLI's words for each state (tether-core `Health::label`). */
 export const STATE_LABELS: Record<Health, string> = {
@@ -22,12 +22,12 @@ export const STATE_LABELS: Record<Health, string> = {
 export type Glyph = Health | "syncing" | "paused";
 
 export const GLYPHS: Record<Glyph, ComponentType<SVGProps<SVGSVGElement>>> = {
-  "in-sync": InSyncIcon,
-  behind: BehindIcon,
-  skipped: SkippedIcon,
-  "needs-you": NeedsYouIcon,
-  syncing: SyncingIcon,
-  paused: PausedIcon,
+  "in-sync": CheckCircleIcon,
+  behind: ArrowDownToLineIcon,
+  skipped: MinusCircleIcon,
+  "needs-you": WarningIcon,
+  syncing: SpinnerIcon,
+  paused: PauseCircleIcon,
 };
 
 /** Each glyph in its colour; the syncing arc also spins. */

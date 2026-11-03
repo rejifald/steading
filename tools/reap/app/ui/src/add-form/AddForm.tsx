@@ -2,7 +2,7 @@ import { Field } from "@base-ui/react/field";
 import { useState, type FormEvent } from "react";
 
 import type { ReapApi } from "../api";
-import { TextButton } from "../controls/TextButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
 import { WorktreeLine } from "../worktree-list/WorktreeLine";
 
 const FIELD = "flex flex-col gap-1";

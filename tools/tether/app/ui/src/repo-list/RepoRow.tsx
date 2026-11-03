@@ -2,9 +2,9 @@ import { Tooltip } from "@base-ui/react/tooltip";
 import { useState, type FocusEvent } from "react";
 
 import type { Row } from "../api";
-import { FolderIcon, SettingsIcon, SyncIcon } from "../controls/icons";
-import { IconButton } from "../controls/IconButton";
-import { ProgressLine } from "../ProgressLine";
+import { FolderIcon, SlidersIcon, RefreshIcon } from "@steading/tray-popover/controls/icons";
+import { IconButton } from "@steading/tray-popover/controls/IconButton";
+import { ProgressLine } from "@steading/tray-popover/ProgressLine";
 import { RepoLine } from "../RepoLine";
 import { ago } from "./ago";
 
@@ -53,13 +53,13 @@ export function RepoRow({ row, detail, busy, paused = false, now, onSync, onOpen
         >
           <div className="flex w-0 shrink-0 gap-1 overflow-hidden opacity-0 group-hover:w-auto group-hover:overflow-visible group-hover:opacity-100 group-focus-within:w-auto group-focus-within:overflow-visible group-focus-within:opacity-100">
             <IconButton label="Sync now" busy={busy} onClick={() => onSync(row.path)}>
-              <SyncIcon className={busy ? "animate-spin" : undefined} />
+              <RefreshIcon className={busy ? "animate-spin" : undefined} />
             </IconButton>
             <IconButton label="Open in Finder" onClick={() => onOpen(row.path)}>
               <FolderIcon />
             </IconButton>
             <IconButton label="Settings" onClick={() => onSettings(row.path)}>
-              <SettingsIcon />
+              <SlidersIcon />
             </IconButton>
           </div>
         </RepoLine>

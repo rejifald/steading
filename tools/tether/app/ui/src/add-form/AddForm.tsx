@@ -3,12 +3,12 @@ import { RadioGroup } from "@base-ui/react/radio-group";
 import { useEffect, useId, useState, type FormEvent } from "react";
 
 import type { AddRequest, Mode, TetherApi } from "../api";
-import { Callout } from "../Callout";
-import { NeedsYouIcon } from "../controls/icons";
+import { Callout } from "@steading/tray-popover/Callout";
+import { WarningIcon } from "@steading/tray-popover/controls/icons";
 import { IntervalSelect } from "../interval/IntervalSelect";
 import { DEFAULT_INTERVAL_SECONDS, PRESETS, choiceOf } from "../interval/intervals";
 import { RepoLine } from "../RepoLine";
-import { TextButton } from "../controls/TextButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
 import { ModeOption } from "./ModeOption";
 
 const MODES: { value: Mode; label: string; hint: string }[] = [
@@ -258,7 +258,7 @@ export function AddForm({ api, onDone, onCancel, onPendingChange }: AddFormProps
               role="alert"
               heading={
                 <>
-                  <NeedsYouIcon className="shrink-0 text-needs-you" />
+                  <WarningIcon className="shrink-0 text-needs-you" />
                   <span className="font-medium">Not added</span>
                 </>
               }

@@ -1,4 +1,5 @@
-import { TextButton } from "./controls/TextButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
+import { PopoverFooter } from "@steading/tray-popover/PopoverFooter";
 
 interface FooterProps {
   hasRepos: boolean;
@@ -24,7 +25,7 @@ export function Footer({
   onAdd,
 }: FooterProps) {
   return (
-    <footer className="flex items-center gap-2 border-t border-border px-4 py-3">
+    <PopoverFooter>
       {(hasRepos || isLoading) && (
         <TextButton disabled={isLoading || isSyncing} onClick={onSyncAll}>
           Sync all
@@ -38,6 +39,6 @@ export function Footer({
           Add repository
         </TextButton>
       )}
-    </footer>
+    </PopoverFooter>
   );
 }

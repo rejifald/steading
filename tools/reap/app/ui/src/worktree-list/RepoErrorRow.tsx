@@ -1,5 +1,5 @@
 import type { Repo, WorktreeAction } from "../api";
-import { TextButton } from "../controls/TextButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
 
 interface RepoErrorRowProps {
   repo: Pick<Repo, "name" | "path" | "error">;

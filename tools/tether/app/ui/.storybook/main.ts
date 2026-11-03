@@ -1,7 +1,7 @@
 import type { StorybookConfig } from "@storybook/react-vite";
 import type { Plugin } from "vite";
 
-/** The one rule in `src/theme.css` that switches the tokens to dark. */
+/** The one rule in each `src/theme.css` (tether's and the shared package's) that switches the tokens to dark. */
 const DARK_MEDIA = "@media (prefers-color-scheme: dark) {";
 
 /**
@@ -33,7 +33,8 @@ function themeByAttribute(): Plugin {
 }
 
 const config: StorybookConfig = {
-  stories: ["../src/**/*.stories.tsx"],
+  // The shared controls, callout and progress line keep their stories beside them in the package.
+  stories: ["../src/**/*.stories.tsx", "../../../../../packages/tray-popover/src/**/*.stories.tsx"],
   framework: "@storybook/react-vite",
   core: { disableTelemetry: true },
   viteFinal: (vite) => ({ ...vite, plugins: [themeByAttribute(), ...(vite.plugins ?? [])] }),

@@ -101,6 +101,7 @@ describe("Popover", () => {
       const panel = await screen.findByRole("alert");
       expect(panel).toHaveTextContent("Cannot read repos.toml");
       expect(panel).toHaveTextContent("line 3: expected a table");
+      expect(panel).toHaveTextContent("Fix the file, then try again. Nothing syncs until it reads.");
       expect(screen.getAllByRole("alert")).toHaveLength(1);
       expect(screen.getByRole("status")).toHaveTextContent("needs you");
       expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();

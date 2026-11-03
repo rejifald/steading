@@ -1,6 +1,6 @@
 import { Select } from "@base-ui/react/select";
 
-import { CheckIcon, ChevronIcon } from "../controls/icons";
+import { CheckIcon, ChevronDownIcon } from "@steading/tray-popover/controls/icons";
 import type { IntervalChoice } from "./intervals";
 
 interface IntervalSelectProps {
@@ -34,7 +34,7 @@ export function IntervalSelect({
       >
         <Select.Value />
         <Select.Icon className="text-muted">
-          <ChevronIcon />
+          <ChevronDownIcon />
         </Select.Icon>
       </Select.Trigger>
       <Select.Portal>

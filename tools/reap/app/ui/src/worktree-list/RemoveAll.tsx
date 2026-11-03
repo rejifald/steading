@@ -2,7 +2,7 @@ import type { KeyboardEvent } from "react";
 import { useState } from "react";
 
 import type { WorktreeAction } from "../api";
-import { TextButton } from "../controls/TextButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
 
 interface RemoveAllButtonProps {
   count: number;
