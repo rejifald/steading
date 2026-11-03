@@ -9,11 +9,11 @@ describe("LoadingRows", () => {
     expect(container.firstElementChild).toHaveAttribute("aria-busy", "true");
   });
 
-  it("draws four rows of two bars", () => {
+  it("draws four rows of a glyph circle and two bars", () => {
     const { container } = render(<LoadingRows />);
     const rows = container.firstElementChild?.children ?? [];
     expect(rows).toHaveLength(4);
-    for (const row of Array.from(rows)) expect(row.children).toHaveLength(2);
+    for (const row of Array.from(rows)) expect(row.children).toHaveLength(3);
   });
 
   it("does not show the empty copy or a button", () => {

@@ -37,6 +37,45 @@ no worktrees (the existing empty state), or a report with nothing to remove (`A-
   sentence wraps; every other row's line 2 truncates with an ellipsis.
 - Open: none.
 
+## Round 2: the shared look (2026-11-03)
+
+Decided by the agent on the owner's go-ahead ("start ui upgrade of git reap similar to the recent
+redesign of git tether"); reversible, listed under *Decisions taken* in the PR. The outcome
+inbox above stays as the layout. What changes is tether's round 3–6 look
+([tether anatomy](../../../../tether/docs/design/popover/anatomy.md) §2), built from
+`@steading/tray-popover` so nothing is copied. No new artboards: tether's boards are the
+visual reference, mapped onto reap's states below.
+
+- **Glyphs replace dots**, 16px, in the state colour, on section headings, the header and the
+  ghost rows: *Needs you* triangle (`WarningIcon`), *Ready to remove* bin (`BinIcon`,
+  `text-removable`), *Merged, but held* pause (`PauseCircleIcon`, `text-held`), *In progress*
+  dashed circle (`DashedCircleIcon`, `text-open`), *Kept* pin (`PinIcon`, `text-open`). The
+  header adds *tidy* (check circle, `text-removable`), *removal pending* (bin, `text-held`),
+  *refreshing…* (spinning arc, `text-progress`) and *paused* (pause, `text-faint`). Rows carry
+  no glyph: their section already says it (colour only where something differs).
+- **Header precedence for the state word** (as tether round 5): read error (`needs you`) →
+  paused → needs you (`needs you (<n>)`) → refreshing → the overall state. The word is quiet
+  (`text-muted`) for tidy and paused. The right slot keeps the counts and size; it no longer
+  says `Paused`. The progress hairline runs along the header while refreshing or removing.
+- **Needs-you rows become raised callouts** (`Callout`, tone `needs-you`): the strip holds the
+  triangle, the branch (truncating), and `repo · age` on the right; the body holds the sentence
+  in `text-needs-you`, wrapping, and the text buttons as before (`inset`). A repo error is the
+  same callout with the repo's name and its error. They stay list items of the Needs you list.
+- **Remove all confirm** is a plain `Callout` under the Ready heading: heading
+  `Remove <n> worktrees?`, body `git still checks each one and refuses any that changed.`,
+  *Remove* and *Cancel* as inset buttons; while it runs, *Removing…* with both disabled.
+- **A worktree being removed** (Remove now, or one of Remove all) takes the progress wash
+  (`bg-progress/10`), an inset progress hairline along its bottom, and `removing…` in place of
+  its meta, until the next report drops it.
+- **Footer:** while paused, *Resume* is the primary button and *Add repository* goes quiet;
+  *Refresh* is disabled while refreshing (as today).
+- **Notice strip and read error** come from the package: a needs-you-tinted strip with the
+  triangle under the header; the read-error panel with the triangle and the error in monospace.
+- **Skeleton** rows lead with a glyph circle, as tether's.
+- Not taken from tether: stacked and dismissible callouts (round 6). reap's Needs you is usually
+  one or two rows, and a dismissal would hide a worktree reap is waiting on. Open: revisit if
+  Needs you regularly holds three or more.
+
 ## 3. Code archaeology
 
 - `app/ui/src/api.ts` — `State`, `Worktree`, `Repo.policy`, `Worktree.removes_at` (set only under

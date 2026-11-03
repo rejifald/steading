@@ -1,8 +1,10 @@
 import type { KeyboardEvent } from "react";
 import { useState } from "react";
 
-import type { WorktreeAction } from "../api";
+import { Callout } from "@steading/tray-popover/Callout";
 import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
+import type { WorktreeAction } from "../api";
 
 interface RemoveAllButtonProps {
   count: number;
@@ -27,8 +29,8 @@ interface RemoveAllConfirmProps {
 }
 
 /**
- * The confirm under the Ready heading, in place of its lead line: a full-width row, since the
- * heading has no room for it at 360px.
+ * The confirm under the Ready heading, in place of its lead line: a plain raised callout, since
+ * the heading has no room for it at 360px. Removal is not a state, so it carries no tint.
  */
 export function RemoveAllConfirm({ paths, onAction, onClose }: RemoveAllConfirmProps) {
   const [isRemoving, setIsRemoving] = useState(false);
@@ -53,14 +55,18 @@ export function RemoveAllConfirm({ paths, onAction, onClose }: RemoveAllConfirmP
   };
 
   return (
-    <div role="group" aria-label="Confirm remove all" onKeyDown={cancelOnEscape} className="flex items-center gap-2 py-1">
-      <span className="flex-1 text-sm text-text">{`Remove ${paths.length} ${noun}?`}</span>
-      <TextButton size="compact" autoFocus disabled={isRemoving} onClick={onClose}>
-        Cancel
-      </TextButton>
-      <TextButton variant="primary" size="compact" disabled={isRemoving} onClick={() => void removeAll()}>
-        Remove
-      </TextButton>
+    <div role="group" aria-label="Confirm remove all" onKeyDown={cancelOnEscape} className="py-1">
+      <Callout tone="plain" heading={<span className="font-medium">{`Remove ${paths.length} ${noun}?`}</span>}>
+        <p className="text-muted">git still checks each one and refuses any that changed.</p>
+        <div className="flex gap-2">
+          <TextButton variant="inset" disabled={isRemoving} onClick={() => void removeAll()}>
+            {isRemoving ? "Removing…" : "Remove"}
+          </TextButton>
+          <TextButton variant="inset" autoFocus disabled={isRemoving} onClick={onClose}>
+            Cancel
+          </TextButton>
+        </div>
+      </Callout>
     </div>
   );
 }

@@ -31,6 +31,12 @@ design-handover). One surface: the menu-bar popover in `app/ui/`.
   source (`*.test.tsx`). Popover-level behaviour is in `src/Popover.test.tsx` against
   `createFakeApi()` (`src/api.fake.ts`). The shared pieces are tested in the package:
   `npm --prefix packages/tray-popover test -- --run`.
+- Storybook 10 (`app/ui/.storybook/`, the theme switch from the package):
+  `npm --prefix app/ui run storybook` (port 6007, or the `reap-storybook` entry in
+  `.claude/launch.json`), `run build-storybook`. One story per state in `src/Popover.stories.tsx`,
+  each a key of `SCENARIOS` in `src/api.scenarios.ts`; `src/api.scenarios.test.tsx` renders
+  every scenario. One alone: `http://localhost:6007/iframe.html?id=popover-states--<name>&viewMode=story`
+  (add `&globals=theme:light`).
 - No visual-regression or a11y harness yet.
 
 ## Viewport
@@ -50,6 +56,7 @@ design-handover). One surface: the menu-bar popover in `app/ui/`.
 
 ## Capturing the real surface
 
-- `npm --prefix app/ui run dev` serves the popover against the fake API in a plain browser.
+- `npm --prefix app/ui run dev` serves the popover against the fake API in a plain browser;
+  `/?scenario=<name>` renders one of `SCENARIOS`.
   Feed real data by passing `repos` from `target/debug/git-reap status --json` into
   `createFakeApi({ repos })`. Headless Chrome screenshots at `--window-size=360,480`.

@@ -1,7 +1,8 @@
+import { useCallback, useEffect, useState } from "react";
+
 import { NoticeStrip } from "@steading/tray-popover/NoticeStrip";
 import { PopoverFrame } from "@steading/tray-popover/PopoverFrame";
 import { ReadError } from "@steading/tray-popover/ReadError";
-import { useCallback, useEffect, useState } from "react";
 
 import { AddForm } from "./add-form/AddForm";
 import type { ReapApi, Snapshot, WorktreeAction } from "./api";
@@ -18,6 +19,8 @@ const ACTIONS: Record<WorktreeAction, (api: ReapApi, path: string) => Promise<vo
   "remove-now": (api, path) => api.removeNow(path),
 };
 
+const NONE_REMOVING: ReadonlySet<string> = new Set();
+
 /** How often "3 min ago" is recomputed while the popover is open. */
 const CLOCK_TICK = 30_000;
 
@@ -26,18 +29,25 @@ export function Popover({ api }: { api: ReapApi }) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [view, setView] = useState<"list" | "add">("list");
   const [actionError, setActionError] = useState<string | null>(null);
+  /** Worktrees whose removal was clicked, until the next report says what happened. */
+  const [removing, setRemoving] = useState<ReadonlySet<string>>(NONE_REMOVING);
   const now = useNow(CLOCK_TICK);
+
+  const receive = useCallback((next: Snapshot) => {
+    setSnapshot(next);
+    setRemoving(NONE_REMOVING);
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let isLive = true;
-    void api.onReport(setSnapshot).then((stop) => (isLive ? (unlisten = stop) : stop()));
-    api.report().then(setSnapshot, (e: unknown) => setActionError(String(e)));
+    void api.onReport(receive).then((stop) => (isLive ? (unlisten = stop) : stop()));
+    api.report().then(receive, (e: unknown) => setActionError(String(e)));
     return () => {
       isLive = false;
       unlisten?.();
     };
-  }, [api]);
+  }, [api, receive]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -61,11 +71,32 @@ export function Popover({ api }: { api: ReapApi }) {
     }
   }, []);
 
+  const act = useCallback(
+    async (action: WorktreeAction, path: string): Promise<boolean> => {
+      if (action !== "remove-now") return run(ACTIONS[action](api, path));
+      setRemoving((paths) => new Set(paths).add(path));
+      const isDone = await run(ACTIONS[action](api, path));
+      if (!isDone) {
+        setRemoving((paths) => {
+          const rest = new Set(paths);
+          rest.delete(path);
+          return rest;
+        });
+      }
+      return isDone;
+    },
+    [api, run],
+  );
+
   const report = snapshot?.report ?? null;
   const readError = snapshot && !report ? snapshot.error : null;
-  const notice = actionError ?? snapshot?.note ?? (readError ? null : snapshot?.error) ?? null;
+  const staleError = readError ? null : (snapshot?.error ?? null);
+  const notice =
+    actionError ??
+    snapshot?.note ??
+    (staleError ? `Cannot read repos.toml: ${staleError}. Showing the last report.` : null);
   const isEmptyList = report !== null && report.repos.length === 0;
-  const retry = () => api.report().then(setSnapshot, (e: unknown) => setActionError(String(e)));
+  const retry = () => api.report().then(receive, (e: unknown) => setActionError(String(e)));
 
   const body = (() => {
     if (view === "add") {
@@ -101,7 +132,8 @@ export function Popover({ api }: { api: ReapApi }) {
         <WorktreeList
           repos={report?.repos ?? []}
           now={now}
-          onAction={(action, path) => run(ACTIONS[action](api, path))}
+          onAction={act}
+          removing={removing}
           onAdd={() => setView("add")}
         />
         <Footer
@@ -120,6 +152,7 @@ export function Popover({ api }: { api: ReapApi }) {
     <PopoverFrame>
         <Header
           snapshot={snapshot}
+          isPending={view === "list" && ((snapshot?.refreshing ?? false) || removing.size > 0)}
           {...(view === "add" ? { title: "Add repository", showState: false } : {})}
           {...(view === "list" && isEmptyList ? { showState: false } : {})}
         />

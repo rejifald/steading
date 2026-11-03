@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "@steading/tray-popover/theme.css";
 
+/* Storybook's files are not the app: a word in them must not add a utility to its bundle. */
+@source not "./**/*.stories.tsx";
+@source not "./ScenarioPopover.tsx";
+@source not "../.storybook";
+
 /* reap's own tokens (docs/styleguide.md); the shared ones are in the package. */
 @theme {
   --color-accent: #2e7d4f;

@@ -15,11 +15,15 @@ import { WorktreeRow } from "./WorktreeRow";
 /** Ready rows shown before "Show N more". */
 const READY_ROW_LIMIT = 4;
 
+const NONE_REMOVING: ReadonlySet<string> = new Set();
+
 interface WorktreeListProps {
   repos: Repo[];
   now: Date;
   onAction: (action: WorktreeAction, path: string) => Promise<boolean> | void;
   onAdd: () => void;
+  /** Worktrees whose removal is running, by path. */
+  removing?: ReadonlySet<string>;
 }
 
 interface Entry {
@@ -74,15 +78,18 @@ function readyLeadOf(entries: Entry[]): string {
 }
 
 /** The scrolling middle of the popover: worktrees grouped by outcome across repos. */
-export function WorktreeList({ repos, now, onAction, onAdd }: WorktreeListProps) {
+export function WorktreeList({ repos, now, onAction, onAdd, removing = NONE_REMOVING }: WorktreeListProps) {
   const [isConfirmingRemoveAll, setIsConfirmingRemoveAll] = useState(false);
   if (repos.length === 0) return <EmptyState onAdd={onAdd} />;
   const needsYou = entriesOf(repos, "needs-you");
   const reposWithError = repos.filter((repo) => repo.error);
   const needsYouCount = needsYou.length + reposWithError.length;
   const ready = entriesOf(repos, "ready");
-  // Only removable worktrees can be removed by hand; a missing one is cleared by a sweep.
-  const removablePaths = ready.filter(({ worktree }) => worktree.state === "removable").map(({ worktree }) => worktree.path);
+  // Only removable worktrees can be removed by hand; a missing one is cleared by a sweep, and
+  // one already being removed is not offered again.
+  const removablePaths = ready
+    .filter(({ worktree }) => worktree.state === "removable" && !removing.has(worktree.path))
+    .map(({ worktree }) => worktree.path);
   const held = entriesOf(repos, "held");
   const inProgress = entriesOf(repos, "in-progress");
   const kept = entriesOf(repos, "kept");
@@ -94,13 +101,14 @@ export function WorktreeList({ repos, now, onAction, onAdd }: WorktreeListProps)
       now={now}
       onAction={onAction}
       emphasis={emphasis}
+      isRemoving={removing.has(worktree.path)}
     />
   );
 
   return (
     <ScrollArea.Root className="relative min-h-0 flex-1">
       <ScrollArea.Viewport className="h-full focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
-        <OutcomeSection outcome="needs-you" title="Needs you" count={needsYouCount}>
+        <OutcomeSection outcome="needs-you" title="Needs you" count={needsYouCount} isRaised>
           {reposWithError.map((repo) => (
             <RepoErrorRow key={repo.path} repo={repo} onAction={onAction} />
           ))}

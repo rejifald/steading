@@ -16,7 +16,10 @@ declare global {
 async function chooseApi(): Promise<ReapApi> {
   if (window.__TAURI_INTERNALS__) return tauriApi;
   const { createFakeApi } = await import("./api.fake");
-  return createFakeApi();
+  const scenario = new URLSearchParams(window.location.search).get("scenario");
+  if (scenario === null) return createFakeApi();
+  const { SCENARIOS } = await import("./api.scenarios");
+  return createFakeApi(SCENARIOS[scenario] ?? {});
 }
 
 const root = document.getElementById("root");
