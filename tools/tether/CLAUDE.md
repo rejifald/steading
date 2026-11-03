@@ -14,7 +14,7 @@ Part of steading: the repo-wide commands, commit rules and owner paths are in th
 
 UI (`app/ui/`, the popover; [ADR 0002](docs/adr/0002-the-tray-ui-is-a-react-popover.md), [styleguide](docs/styleguide.md)):
 
-- `npm --prefix app/ui ci` — install the pinned dependencies (never `npm install` outside `app/ui`)
+- `npm ci` at the repository root — installs every popover's pinned dependencies (never `npm install` inside `app/ui`)
 - `npm --prefix app/ui test -- --run` — component tests (Vitest, Testing Library, the fake command layer)
 - `npm --prefix app/ui run typecheck` — TypeScript, strict
 - `npm --prefix app/ui run dev` — the popover in a browser against `src/api.fake.ts`

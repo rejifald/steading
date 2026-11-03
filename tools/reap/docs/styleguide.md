@@ -16,7 +16,7 @@ when a worktree needs the owner.
 
 ## Tokens
 
-All tokens live in `app/ui/src/theme.css` under `@theme`; Tailwind's own palette, radii, type
+Shared tokens live in `packages/tray-popover/src/theme.css`; `app/ui/src/theme.css` imports it and adds only reap's own, both under `@theme`. Tailwind's own palette, radii, type
 scale and fonts are cleared, so an arbitrary value (`bg-[#fff]`, `w-[361px]`) is a bug.
 
 | Group | Tokens | Notes |

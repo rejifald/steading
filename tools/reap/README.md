@@ -61,7 +61,7 @@ cargo run -q -p reap-core -- sweep --dry-run
 Run the menu-bar app (needs Node for the popover):
 
 ```bash
-npm --prefix app/ui ci && npm --prefix app/ui run build && cargo run -p reap-app
+npm --prefix ../.. ci && npm --prefix app/ui run build && cargo run -p reap-app
 ```
 
 Preview the popover in a browser against fake data: `npm --prefix app/ui run dev` (the

@@ -230,7 +230,7 @@ cargo test --workspace --locked
 The popover (`app/ui/`):
 
 ```bash
-npm --prefix app/ui ci
+npm --prefix ../.. ci   # one install for the whole workspace
 npm --prefix app/ui test -- --run
 npm --prefix app/ui run typecheck
 npm --prefix app/ui run dev

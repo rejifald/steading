@@ -5,7 +5,10 @@ only says where things are.
 
 ## Tokens
 
-- `app/ui/src/theme.css` (`@theme`, plus dark values under `prefers-color-scheme: dark`) is
+- The shared tokens (surfaces, text, border, focus, radii, fonts, type scale, shadow) live in
+  `packages/tray-popover/src/theme.css`; `app/ui/src/theme.css` imports it and adds only
+  tether's own (`--color-accent`, `--color-in-sync`, `--color-behind`, `--color-skipped`,
+  `--color-progress`). Dark values sit under `prefers-color-scheme: dark`. Together they are
   the only place a colour, length, radius, shadow or type size is defined. The table of what
   each token means is in [docs/styleguide.md](../docs/styleguide.md#tokens).
 - Tailwind's own palette, radii, type scale and fonts are cleared, so only token utilities
@@ -19,25 +22,26 @@ only says where things are.
 | Source | Scope |
 |---|---|
 | `@base-ui/react` | every interactive primitive (Button, Field, Input, RadioGroup/Radio, Tooltip, ScrollArea, Separator); never a hand-rolled clickable `div` |
-| `app/ui/src/controls/` | the project's styled controls: `TextButton`, `IconButton`, `icons` |
-| `app/ui/src/Callout.tsx`, `ProgressLine.tsx` | the raised callout shell (tones `needs-you`, `plain`) and the progress hairline |
+| `@steading/tray-popover` (`packages/tray-popover/`) | what both popovers use: `controls/TextButton`, `controls/IconButton`, `controls/icons` (named by shape), `Callout`, `ProgressLine`, `NoticeStrip`, `ReadError`, `PopoverHeader`, `PopoverFooter`, `PopoverFrame`; import as `@steading/tray-popover/<File>` |
 | `app/ui/src/StateLabel.tsx` | a state as a glyph and the CLI's word (`GLYPHS`) |
 
 There is no barrel; import each file directly.
 
 ## Where a new component goes
 
-One app, one package. A component used by one feature lives in that feature's folder
-(`repo-list/`, `add-form/`); one used by two or more moves to `controls/` (a control) or
-`src/` (a piece of the popover). A new dependency in `app/ui/` is reviewed first (ADR 0002).
+A component used by both tools goes in `packages/tray-popover/` (with its test and story); one
+used by one tool lives in that app. Inside the app, a component used by one feature lives in
+that feature's folder (`repo-list/`, `add-form/`); one used by two or more features moves to
+`src/`. A new dependency in `app/ui/` is reviewed first (ADR 0002).
 
 ## Test harnesses
 
 | Harness | Config | Command | Covers |
 |---|---|---|---|
 | Vitest + Testing Library + jsdom | `app/ui/vite.config.ts`, `src/test-setup.ts` | `npm --prefix app/ui test -- --run` | components against the fake command layer `src/api.fake.ts`: roles, names, text, interaction |
+| Vitest (package) | `packages/tray-popover/vite.config.ts` | `npm --prefix packages/tray-popover test -- --run` | the shared controls and popover pieces on their own |
 | TypeScript | `app/ui/tsconfig.json` | `npm --prefix app/ui run typecheck` | strict types |
-| Storybook 10 (react-vite) | `app/ui/.storybook/main.ts`, `preview.tsx` | `npm --prefix app/ui run storybook` (port 6006), `run build-storybook` | one story per panel of the approved boards (`Popover/*`, named like the captions), leaf components with controls (`Components/*`); `play` steps in `src/popoverSteps.ts` |
+| Storybook 10 (react-vite) | `app/ui/.storybook/main.ts`, `preview.tsx` | `npm --prefix app/ui run storybook` (port 6006), `run build-storybook` | one story per panel of the approved boards (`Popover/*`, named like the captions), leaf components with controls (`Components/*`); `play` steps in `src/popoverSteps.ts`; the package's own stories (`packages/tray-popover/`) show here too |
 
 No visual-regression or a11y harness yet ([ADR 0005](../docs/adr/0005-the-popover-states-live-in-storybook.md)
 § 5); stories are for looking and comparing.
