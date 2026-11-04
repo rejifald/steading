@@ -19,13 +19,13 @@ subcommand and the CLI with one.
 
 **Status:** sweeps. A pass fetches what moved, runs the grace clocks, and removes merged
 worktrees with git's own guards (rules 2 to 13); `git reap status` and the menu-bar app show
-every worktree with its pull request and reap state. The popover's design is a first cut, and
-there is no installer yet.
+every worktree with its pull request and reap state. The popover's design is a first cut.
 
 | Path | What |
 |---|---|
 | `core/` | `reap-core`: config, merge detection, the report and the `git-reap` CLI. No UI deps. |
 | `app/` | `reap-app`: the Tauri tray shell; `app/ui/` is the React popover ([styleguide](docs/styleguide.md)). |
+| `install.sh` | Build, install to `~/Applications`, link the CLI as `git-reap`, login item; `--uninstall` removes them. The steps are the repo's [`scripts/install-app.sh`](../../scripts/install-app.sh). |
 | `docs/adr/` | Decisions; [0001](docs/adr/0001-reap-sweeps-merged-worktrees.md) is the spec. |
 | `scripts/check-sensitive.sh` | Keeps local paths, secrets and identities out of commits ([CLAUDE.md](CLAUDE.md) § Commits). |
 
@@ -63,6 +63,22 @@ Run the menu-bar app (needs Node for the popover):
 ```bash
 npm --prefix app/ui ci && npm --prefix app/ui run build && cargo run -p reap-app
 ```
+
+Install it (rule 16): build, show `git reap status` and the first `sweep --dry-run`, ask, then
+copy to `~/Applications/reap.app`, link `~/.local/bin/git-reap`, and register and start the login
+item `~/Library/LaunchAgents/io.github.rejifald.reap.plist`. Answering no installs nothing.
+
+```bash
+./install.sh --dry-run
+```
+
+```bash
+./install.sh
+```
+
+`--uninstall` removes the login item, the CLI link and the app; `~/.config/reap` and the listed
+clones stay as they are. To keep it updated from this clone, see the
+[repository README](../../README.md#updates).
 
 Preview the popover in a browser against fake data: `npm --prefix app/ui run dev` (the
 `reap-ui` entry in `.claude/launch.json`), at 360 px wide.
