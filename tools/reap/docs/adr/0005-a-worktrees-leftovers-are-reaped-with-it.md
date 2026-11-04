@@ -77,9 +77,35 @@ matched to a worktree by its name, which is a guess.
    held only by servers or Compose projects, whatever the two settings say, with the same steps
    and checks, and no grace. `--dry-run` prints the `docker compose` and `kill` commands as
    `would run:` and runs none.
+6. **The popover names every holder.** Rule 15's worktree view gains two things, and
+   `git reap status` prints the same facts:
+   - **Holders on a held row.** In *Merged, but held*, the collapsed summary counts holders by
+     kind (`1 server · 1 stack · 1 in use`, only kinds present). A row's second line says what
+     holds it (`Merged in #212 · held by a dev server`), and under it one line per holder,
+     indented on a hairline:
+     - a server: its command, port, pid and uptime (`vite :5173 · pid 4121 · up 2 d`), with
+       *Stop*;
+     - a Compose project: its name, running count and uptime, then its services and
+       `volumes kept` (`webapp-dev 4 running · up 12 h`), with *Stop*;
+     - anything else: the process names and `reap won’t stop a shell or a session`, with no
+       button.
 
-Unchanged: a worktree is never removed while a process it cannot stop is inside it, nothing is
-stopped in a worktree that is not otherwise removable, and reap never touches a container,
+     A row held only by servers or Compose projects offers *Stop and remove* (rule 5) beside
+     *Keep*.
+   - **A *Still running* section.** It lists every server and running Compose project inside a
+     listed clone's worktrees, merged or not, so the operator can see what is still up. Each row
+     is the holder (`vite :5173 · up 2 d`) and, below it, its worktree and that worktree's state
+     (`in feat/status-page · merged #212`, `in feat/checkout · in progress`), with *Stop*. Those
+     in merged worktrees come first. It sits after *Merged, but held*, collapsed, with the
+     summary `<n> in merged worktrees`, and is not shown when nothing runs. The header's right
+     slot leads with `<n> running` when there is any.
+
+   *Stop* here stops that one holder, with the steps and checks of rule 4, and removes nothing.
+   The tray icon's states are unchanged: a running server alone never makes reap *need you*.
+
+Unchanged: a worktree is never removed while a process it cannot stop is inside it, reap stops
+nothing on its own in a worktree that is not otherwise removable (only the operator's *Stop*
+does), and reap never touches a container,
 process or build folder that it cannot tie to a listed clone's worktree.
 
 ## Considered options
@@ -100,6 +126,12 @@ process or build folder that it cannot tie to a listed clone's worktree.
   protects.
 - **`SIGKILL` after the timeout.** It always frees the worktree, but a server that ignores
   `SIGTERM` may be writing state. Leaving it running and saying so loses nothing.
+- **Show holders only on held rows, with no *Still running* section.** It keeps the popover
+  about removal, but a server in an unmerged worktree, or one the operator forgot, is then
+  visible only by `lsof`. Listing them costs one collapsed line.
+- **Stop only servers in merged worktrees.** It keeps reap out of work in progress, but the
+  operator who opens *Still running* to stop a server would then need a terminal for half of
+  them. *Stop* acts on one holder the operator picked, so it removes nothing and guesses nothing.
 - **Delete simulators whose name matches the worktree, or apps a worktree's build installed.**
   Nothing on a device records the worktree, so any match is a guess. A guess is not enough for
   deleting a device someone else may use.
@@ -112,6 +144,8 @@ process or build folder that it cannot tie to a listed clone's worktree.
 - With the settings on, a forgotten dev server or stack no longer keeps a merged worktree
   forever. A stack whose project name is shared stops for every worktree of the repo, and comes
   back with the next `compose up`.
+- The popover is also where an operator sees and stops what runs in their worktrees. The
+  [styleguide](../styleguide.md) and the popover anatomy gain these rows when this is built.
 - reap now depends on `docker` and on Xcode's defaults in addition to git and `gh`, both
   optional: without them it behaves as before.
 - A process that holds files in the worktree without having its current directory there (a
