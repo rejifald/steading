@@ -301,7 +301,6 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
         ctx.write(&repo.path, &["worktree", "prune"])?;
         outcome.pruned = !ctx.dry_run;
     }
-    outcome.pruned_salvage = salvage::prune(ctx, repo, now)?;
     outcome.refused = refusals
         .iter()
         .map(|(path, message)| Refused {
@@ -320,6 +319,8 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
             now,
         )?;
     }
+    // After the state is saved: a failed deletion must not lose this pass's clocks and refusals.
+    outcome.pruned_salvage = salvage::prune(ctx, repo, now)?;
     let has_changed = !outcome.removed.is_empty()
         || !refusals.is_empty()
         || outcome.pruned

@@ -395,6 +395,7 @@ fn restore(paths: &Paths, repo: &Repo, refname: &str, worktree: Option<&str>) ->
         str::to_string,
     );
     let path = quoted(&path);
+    let refname = quoted(refname);
     format!(
         "git -C {} worktree add {path} {refname} && git -C {path} reset HEAD~1",
         quoted(&paths.tilde(&repo.path))
@@ -430,11 +431,18 @@ pub(crate) fn prune(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>) -> Result<Vec<St
             continue;
         }
         // The old value makes git refuse if the ref moved since it was listed.
-        ctx.write(
-            &repo.path,
-            &["update-ref", "-d", &salvaged.refname, &salvaged.commit],
-        )?;
-        pruned.push(salvaged.refname);
+        let args = ["update-ref", "-d", &salvaged.refname, &salvaged.commit];
+        match ctx.write_output(&repo.path, &args)? {
+            Some(output) if !output.status.success() => {
+                // One stuck ref must not abort the pass; the next pass tries it again.
+                ctx.note(format!(
+                    "could not delete {}: {}",
+                    salvaged.refname,
+                    crate::git::first_error_line(&output)
+                ));
+            }
+            _ => pruned.push(salvaged.refname),
+        }
     }
     Ok(pruned)
 }
@@ -527,6 +535,27 @@ fn rfc3339(time: DateTime<Utc>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_restore_quotes_a_refname_with_shell_characters() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(dir.path(), &dir.path().join("cfg"));
+        let repo = Repo {
+            path: dir.path().join("app"),
+            remote: "origin".into(),
+            base: None,
+            policy: Policy::Auto,
+            grace: std::time::Duration::ZERO,
+            stale_after: std::time::Duration::ZERO,
+            dirty_grace: std::time::Duration::ZERO,
+            salvage_max_untracked: 0,
+            salvage_max_age: std::time::Duration::ZERO,
+        };
+
+        let line = restore(&paths, &repo, "refs/reap/salvage/x$(id)/1", Some("/w"));
+
+        assert!(line.contains("'refs/reap/salvage/x$(id)/1'"), "{line}");
+    }
 
     #[test]
     fn a_folder_name_becomes_one_valid_ref_component() {

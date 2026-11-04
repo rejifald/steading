@@ -558,3 +558,23 @@ fn a_save_is_deleted_after_salvage_max_age() {
     assert_eq!(salvage_refs(&sandbox).len(), 0);
     assert_eq!(day_31.report.salvaged.len(), 0);
 }
+
+#[test]
+fn a_ref_that_cannot_be_deleted_does_not_abort_the_pass() {
+    let sandbox = Sandbox::new();
+    let worktree = merged_worktree(&sandbox, "stuck");
+    std::fs::write(worktree.join("notes.md"), "wip").unwrap();
+    sandbox.list_clone();
+    let (_, due) = sweep_past_both_graces(&sandbox);
+    let refname = due.removed[0].salvaged_to.clone().unwrap();
+    // A held lock on the ref makes `update-ref -d` fail.
+    let lock = sandbox.clone.join(".git").join(format!("{refname}.lock"));
+    std::fs::write(&lock, "").unwrap();
+
+    let ctx = Ctx::new(sandbox.paths.clone(), false);
+    let outcomes = sweep::sweep(&ctx, None, Duration::ZERO, later(40 * DAY + 3));
+
+    let outcomes = outcomes.expect("the pass still succeeds");
+    assert_eq!(outcomes[0].pruned_salvage.len(), 0);
+    assert_eq!(salvage_refs(&sandbox), [refname]);
+}
