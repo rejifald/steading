@@ -15,6 +15,7 @@ pub mod in_use;
 pub mod lock;
 pub mod paths;
 pub mod report;
+pub mod salvage;
 pub mod state_file;
 pub mod sweep;
 pub mod worktree_list;

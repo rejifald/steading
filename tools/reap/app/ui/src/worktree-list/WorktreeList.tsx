@@ -10,6 +10,7 @@ import { OutcomeSection } from "./OutcomeSection";
 import { RemoveAllButton, RemoveAllConfirm } from "./RemoveAll";
 import { RepoErrorRow } from "./RepoErrorRow";
 import { RepoNotes } from "./RepoNotes";
+import { SalvagedSection } from "./SalvagedSection";
 import { WorktreeRow } from "./WorktreeRow";
 
 /** Ready rows shown before "Show N more". */
@@ -149,6 +150,7 @@ export function WorktreeList({ repos, now, onAction, onAdd, removing = NONE_REMO
         <OutcomeSection outcome="kept" title="Kept" count={kept.length} collapsible summary="until new commits">
           {kept.map((entry) => row(entry))}
         </OutcomeSection>
+        <SalvagedSection repos={repos} now={now} />
         <RepoNotes repos={repos} />
       </ScrollArea.Viewport>
       <ScrollArea.Scrollbar className="flex w-2 justify-center py-1 opacity-0 data-hovering:opacity-100 data-scrolling:opacity-100">

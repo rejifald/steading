@@ -68,6 +68,9 @@ impl Sandbox {
             &root,
             &["clone", "--quiet", remote.to_str().unwrap(), "app"],
         );
+        // reap's own `commit-tree` (a salvage) needs an identity; the clone's config gives one.
+        git(&clone, &["config", "user.name", "Test"]);
+        git(&clone, &["config", "user.email", "test@example.com"]);
         commit(&clone, "readme");
         git(&clone, &["push", "--quiet", "origin", "main"]);
         git(&clone, &["remote", "set-head", "origin", "main"]);
@@ -171,7 +174,7 @@ pub fn commit(dir: &Path, name: &str) -> String {
     git(dir, &["rev-parse", "HEAD"])
 }
 
-fn make_executable(file: &Path) {
+pub fn make_executable(file: &Path) {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
 }

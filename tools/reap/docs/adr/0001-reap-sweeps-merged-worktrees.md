@@ -2,7 +2,8 @@
 
 - **Status:** Accepted; rules 3(c), 9 and 11 amended by
   [ADR 0002](0002-merged-pull-request-contains-head.md), rule 13 by
-  [ADR 0003](0003-pushed-stale-worktrees-are-removed.md)
+  [ADR 0003](0003-pushed-stale-worktrees-are-removed.md), rules 4, 6, 10 and 11 by
+  [ADR dirty-merged-worktrees-are-salvaged](0004-dirty-merged-worktrees-are-salvaged.md)
 - **Date:** 2026-10-28
 
 `reap` is a menu-bar app on a developer's Mac that finds the linked worktrees of the clones
@@ -59,6 +60,8 @@ through tether's lock (rule 7).
 4. **Clean, with nothing under way.** `git status --porcelain` in the worktree is empty
    (untracked files count; ignored files do not, and `git worktree remove` deletes them), and
    no merge, rebase, cherry-pick, revert or bisect is in progress.
+   [ADR dirty-merged-worktrees-are-salvaged](0004-dirty-merged-worktrees-are-salvaged.md) saves
+   a merged worktree's changes to a ref and then removes it, after a longer grace.
 5. **Not in use.** The worktree is not `git worktree lock`ed, and no process has its current
    directory inside it. reap runs `lsof -d cwd` once per pass and matches paths by prefix.
 6. **Removable** is merged (3), clean (4), not in use (5), and not kept (rule 10). Only a

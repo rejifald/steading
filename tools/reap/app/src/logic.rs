@@ -71,9 +71,14 @@ pub fn notifications(outcomes: &[Outcome]) -> Vec<(String, String)> {
                 (Some(branch), None) => format!(" and branch {branch}"),
                 (None, _) => String::new(),
             };
+            let salvaged = removed
+                .salvaged_to
+                .as_deref()
+                .map(|refname| format!("; changes saved to {refname}"))
+                .unwrap_or_default();
             messages.push((
                 "reap removed a worktree".into(),
-                format!("{}{branch}", removed.path),
+                format!("{}{branch}{salvaged}", removed.path),
             ));
         }
         for refused in &outcome.refused {
@@ -186,6 +191,7 @@ mod tests {
             reason: "pull request #5 closed without merging".into(),
             last_activity: None,
             removes_at: None,
+            saves_at: None,
             size_bytes: None,
         }
     }
@@ -204,6 +210,7 @@ mod tests {
                 gh_note: None,
                 error: error.map(str::to_string),
                 worktrees,
+                salvaged: Vec::new(),
             }],
         }
     }

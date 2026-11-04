@@ -7,9 +7,12 @@ their linked worktrees, shows each one with its pull request and CI, and removes
 once its work has merged, its tree is clean and nothing runs inside it, after a grace period
 (24 h by default) with a notification and a *Keep* button. An abandoned worktree whose commits
 are all pushed goes the same way, with its branch kept
-([ADR 0003](docs/adr/0003-pushed-stale-worktrees-are-removed.md)). It never touches a main
-clone or a remote, and never removes a worktree that is dirty, locked, in use, or holds
-commits only it has.
+([ADR 0003](docs/adr/0003-pushed-stale-worktrees-are-removed.md)). A merged worktree with
+uncommitted changes goes too, once nothing in it has changed for a week: its changes are saved
+as one commit under `refs/reap/salvage/` in the main clone first, checked, and kept for 30 days
+([ADR dirty-merged-worktrees-are-salvaged](docs/adr/0004-dirty-merged-worktrees-are-salvaged.md)).
+It never touches a main clone's checkout or a remote, and never removes a worktree that is
+locked, in use, mid-merge or mid-rebase, or holds commits only it has.
 
 The spec is [ADR 0001](docs/adr/0001-reap-sweeps-merged-worktrees.md); rule numbers in the
 code and docs refer to it. It is a companion to
@@ -85,8 +88,32 @@ The same checks run in the git hooks (`lefthook.yml`) and in CI (`.github/workfl
 `~/.config/reap/repos.toml` lists the main clones (rule 1): `path`, optional `remote`
 (default `origin`) and `base` (default the remote's default branch), and `interval` (default
 `5m`), `policy`, `grace` and `stale_after` (default `14d`) globally and per repo (rules 7, 10,
-13). `~/.config/reap/state.json` holds the grace clocks, *Keep*s and refused removals; a
-*Pause* file lives beside both.
+13). Three more settings, also global and per repo, govern merged worktrees with uncommitted
+changes: `dirty_grace` (default `7d`, how long nothing in it may change before its changes are
+saved), `salvage_max_untracked` (default `100MB`, the most untracked data a save copies) and
+`salvage_max_age` (default `30d`, when a sweep deletes a save). `~/.config/reap/state.json`
+holds the grace clocks, *Keep*s and refused removals; a *Pause* file lives beside both.
+
+## Salvaged changes
+
+A merged worktree with uncommitted changes is saved before it is removed: `git add -A` into a
+copy of its index, `write-tree`, `commit-tree -p HEAD`, then a ref
+`refs/reap/salvage/<folder>/<YYYYMMDD-HHMMSS>` in the main clone. reap removes the worktree
+with `--force` only after checking that the commit holds every change and untracked file
+(ignored files are dropped, as in any removal). It holds the worktree instead when a merge,
+rebase, cherry-pick or revert is under way, paths are unmerged, an untracked folder is a
+repository of its own, or the untracked files are over `salvage_max_untracked`; its row says
+which.
+
+`git reap salvaged` lists the saves (`--json` too), and `git reap status` and the popover show
+them under each repo. Each one comes with the commands that restore it, for example:
+
+```bash
+git -C ~/Development/app worktree add ~/Development/app-feat refs/reap/salvage/app-feat/20261103-231018 && git -C ~/Development/app-feat reset HEAD~1
+```
+
+The worktree comes back detached at the saved commit; `reset HEAD~1` undoes that commit, so
+the changes are uncommitted again (all unstaged: the staged/unstaged split is not kept).
 
 | Variable | What |
 |---|---|
