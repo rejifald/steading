@@ -12,7 +12,7 @@ use std::sync::atomic::Ordering;
 
 use tauri::AppHandle;
 
-use crate::logic::Event;
+use crate::logic::{self, Event};
 use crate::osascript;
 use crate::state::{Snapshot, State};
 use crate::window;
@@ -105,6 +105,124 @@ pub async fn remove_now(state: Shared<'_>, path: String) -> Result<(), String> {
         let result = reap_core::sweep::remove_now(&ctx, &path, chrono::Utc::now());
         state.send(Event::Refresh);
         result.map(drop).map_err(|e| format!("{e:#}"))
+    })
+    .await?
+}
+
+/// *Find clones*: walks the scan roots on a background thread and returns at once; the
+/// popover follows it through the refreshes, one per root. Ignored while a scan runs. It only
+/// reads (ADR 0004), so it takes no lock.
+#[tauri::command]
+pub fn find_clones(state: Shared<'_>) {
+    let state = state.inner().clone();
+    if state
+        .is_scanning
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    std::thread::spawn(move || {
+        // Clears the scan whichever way it ends, a panic included, so the button never sticks.
+        let _done = ScanDone(state.clone());
+        *state.scan_error.lock().unwrap() = None;
+        let roots = reap_core::config::Config::load(&state.paths)
+            .and_then(|config| reap_core::discovery::roots(&config, &state.paths))
+            .map(|roots| {
+                roots
+                    .iter()
+                    .map(|root| state.paths.tilde(root))
+                    .collect::<Vec<_>>()
+            });
+        let roots = match roots {
+            Ok(roots) => roots,
+            Err(e) => {
+                *state.scan_error.lock().unwrap() = Some(format!("{e:#}"));
+                return;
+            }
+        };
+        *state.scanning.lock().unwrap() = roots.first().cloned();
+        state.send(Event::Refresh);
+        let mut on_root = |left: &str| {
+            *state.scanning.lock().unwrap() = logic::next_scanning(&roots, left);
+            state.send(Event::Refresh);
+        };
+        let bounds = reap_core::discovery::Bounds::default();
+        if let Err(e) = reap_core::discovery::scan(&state.paths, &bounds, &mut on_root) {
+            *state.scan_error.lock().unwrap() = Some(format!("{e:#}"));
+        }
+    });
+}
+
+/// Ends a scan: nothing is being walked, the next may start, and the popover is told.
+struct ScanDone(Arc<State>);
+
+impl Drop for ScanDone {
+    fn drop(&mut self) {
+        *self.0.scanning.lock().unwrap() = None;
+        self.0.is_scanning.store(false, Ordering::SeqCst);
+        self.0.send(Event::Refresh);
+    }
+}
+
+/// *Add* on a suggested clone: reap's own `add`, so every check it makes runs, and its error
+/// text comes back as it is.
+#[tauri::command]
+pub async fn add_suggestion(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_discovery(state, path, |state, path| {
+        reap_core::discovery::add_suggestion(&state.paths, path).map(drop)
+    })
+    .await
+}
+
+/// *Skip*: stops suggesting a clone.
+#[tauri::command]
+pub async fn skip_clone(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_discovery(state, path, |state, path| {
+        reap_core::discovery::skip(&state.paths, path)
+    })
+    .await
+}
+
+/// *Unskip*: suggests a skipped clone again.
+#[tauri::command]
+pub async fn unskip_clone(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_discovery(state, path, |state, path| {
+        reap_core::discovery::unskip(&state.paths, path)
+    })
+    .await
+}
+
+/// *Add folder*: a new scan root. Runs nothing; its clones show after the next scan.
+#[tauri::command]
+pub async fn add_scan_root(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_discovery(state, path, |state, path| {
+        reap_core::discovery::add_root(&state.paths, path)
+    })
+    .await
+}
+
+/// *Remove* on a scan root: its suggestions go with it.
+#[tauri::command]
+pub async fn remove_scan_root(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_discovery(state, path, |state, path| {
+        reap_core::discovery::remove_root(&state.paths, path)
+    })
+    .await
+}
+
+/// Runs one discovery edit on a blocking thread and refreshes after it, failed or not. Like
+/// `add`, it takes no lock: reap has none around repos.toml.
+async fn edit_discovery(
+    state: Shared<'_>,
+    path: String,
+    edit: impl FnOnce(&State, &str) -> anyhow::Result<()> + Send + 'static,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let result = edit(&state, path.trim());
+        state.send(Event::Refresh);
+        result.map_err(|e| format!("{e:#}"))
     })
     .await?
 }
