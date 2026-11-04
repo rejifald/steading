@@ -177,8 +177,8 @@ export function FoundSection({
               className={`group flex flex-1 items-center gap-2 rounded-control text-left text-text ${FOCUS_RING}`}
             >
               <ChevronRightIcon className="shrink-0 text-muted group-data-panel-open:rotate-90" />
-              <span className="font-semibold">{title}</span>
-              <span className="text-faint">{count}</span>
+              {/* The spaces are not drawn (flex items) but keep the button's name readable. */}
+              <span className="font-semibold">{title}</span> <span className="text-faint">{count}</span>{" "}
               {collapsedSummary && <span className="text-xs text-faint">{collapsedSummary}</span>}
             </Collapsible.Trigger>
             <LookAgain onLookAgain={onLookAgain} lookAgainLabel={lookAgainLabel} />

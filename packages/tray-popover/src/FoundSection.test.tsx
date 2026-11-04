@@ -213,7 +213,7 @@ describe("FoundSection collapsed", () => {
     render(collapsed());
     const toggle = screen.getByRole("button", { name: /Found/ });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(toggle).toHaveTextContent("Found2· looked 3 days ago");
+    expect(toggle).toHaveAccessibleName("Found 2 · looked 3 days ago");
     expect(screen.getByRole("button", { name: "Look again" })).toBeInTheDocument();
     expect(screen.queryByText("api")).not.toBeInTheDocument();
   });
