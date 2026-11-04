@@ -1,5 +1,6 @@
+import { PopoverHeader } from "@steading/tray-popover/PopoverHeader";
+
 import type { Row, Snapshot } from "./api";
-import { ProgressLine } from "./ProgressLine";
 import { ago } from "./repo-list/ago";
 import { StateLabel } from "./StateLabel";
 
@@ -18,22 +19,20 @@ interface HeaderProps {
 /** The title, the overall state as a glyph and a word, and a quiet summary on the right. */
 export function Header({ snapshot, now, title = "tether", showState = true, repo, isPending = false }: HeaderProps) {
   const rightSlot = showState ? summaryOf(snapshot, now) : null;
+  const aside = repo ? (
+    <span className="text-sm">
+      <StateLabel tone="header" health={repo.health} behind={repo.behind} />
+    </span>
+  ) : (
+    rightSlot && <span className="text-xs text-faint">{rightSlot}</span>
+  );
   return (
-    <header className="relative flex items-center gap-2 border-b border-border px-4 py-3">
-      <h1 className="min-w-0 truncate text-base font-semibold text-text">{title}</h1>
-      {showState && (
-        <span className="text-sm" role="status">
-          <OverallState snapshot={snapshot} />
-        </span>
-      )}
-      {rightSlot && <span className="ml-auto shrink-0 text-xs text-faint">{rightSlot}</span>}
-      {repo && (
-        <span className="ml-auto shrink-0 text-sm">
-          <StateLabel tone="header" health={repo.health} behind={repo.behind} />
-        </span>
-      )}
-      {isPending && <ProgressLine />}
-    </header>
+    <PopoverHeader
+      title={title}
+      state={showState ? <OverallState snapshot={snapshot} /> : undefined}
+      aside={aside}
+      isPending={isPending}
+    />
   );
 }
 

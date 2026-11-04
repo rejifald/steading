@@ -1,5 +1,6 @@
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
 import { RepoLine } from "../RepoLine";
-import { TextButton } from "../controls/TextButton";
 
 interface EmptyStateProps {
   onAdd: () => void;

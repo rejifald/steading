@@ -1,7 +1,7 @@
 import type { Repo, Worktree, WorktreeAction } from "../api";
-import { BinIcon, FolderIcon, PinIcon } from "../controls/icons";
-import { IconButton } from "../controls/IconButton";
-import { TextButton } from "../controls/TextButton";
+import { BinIcon, FolderIcon, PinIcon } from "@steading/tray-popover/controls/icons";
+import { IconButton } from "@steading/tray-popover/controls/IconButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
 import { shownSize } from "../shownSize";
 import { ago, inTime } from "./ago";
 import { sentenceOf } from "./sentenceOf";

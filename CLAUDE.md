@@ -26,6 +26,12 @@ From the repository root:
 - `scripts/check-sensitive.sh --all` — the sensitive-info check over every tracked file
 - `lefthook install` — once per clone, so the hooks below run (`brew install lefthook`)
 
+The UI is one npm workspace (`packages/tray-popover` and both popovers):
+
+- `npm ci` — install every popover's pinned dependencies; always at the root, never inside `app/ui`
+- `npm --prefix packages/tray-popover test -- --run` — the shared package's tests
+- `npm --prefix packages/tray-popover run typecheck` — the shared package's types
+
 Each tool's UI, icon and installer commands are in its own `CLAUDE.md`.
 
 ## Layout
@@ -37,10 +43,12 @@ then into a crate or package named for what it does (never `common` or `shared`)
 |---|---|
 | `tools/<tool>/core/` | `<tool>-core`: the logic and the UI-free `git-<tool>` CLI. Builds and tests on Linux. |
 | `tools/<tool>/app/` | `<tool>-app`: the Tauri v2 menu-bar shell; the same binary is the CLI. macOS only. |
-| `tools/<tool>/app/ui/` | The popover: React, Base UI and Tailwind, its own npm project. |
+| `tools/<tool>/app/ui/` | The popover: React, Base UI and Tailwind; a member of the root npm workspace. |
+| `packages/tray-popover/` | `@steading/tray-popover`: the controls, icons and popover pieces both popovers use. Source-only. [README](packages/tray-popover/README.md), [ADR 0003](docs/adr/0003-the-popovers-share-one-npm-workspace.md). |
 | `tools/<tool>/docs/` | The tool's ADRs, styleguide, brand and design notes. |
 | `docs/adr/` | Decisions that cover the whole repository. |
 | `scripts/` | Repo gates, the SVG renderer both tools' icon scripts use, the installer both `install.sh` run, and `reinstall.sh`, tether's `after` that updates the apps. |
+| `package.json`, `package-lock.json` | The npm workspace and its one lockfile; raise a dependency here, once. |
 | `rust-toolchain.toml` | The one Rust version every clone and CI build with; raising it is its own commit. |
 
 ## Commits

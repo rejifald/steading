@@ -1,8 +1,9 @@
+import { Callout } from "@steading/tray-popover/Callout";
+import { IconButton } from "@steading/tray-popover/controls/IconButton";
+import { CrossIcon, SlidersIcon, WarningIcon } from "@steading/tray-popover/controls/icons";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
 import type { Row } from "../api";
-import { Callout } from "../Callout";
-import { IconButton } from "../controls/IconButton";
-import { DismissIcon, NeedsYouIcon, SettingsIcon } from "../controls/icons";
-import { TextButton } from "../controls/TextButton";
 import { ago } from "./ago";
 
 /** Reasons only a sync can clear, so Sync now leads (tether-core `report::is_remote_side`). */
@@ -58,7 +59,7 @@ export function NeedsYouCallout({
       aria-label={`${row.name} needs you`}
       heading={
         <>
-          <NeedsYouIcon className="shrink-0 text-needs-you" />
+          <WarningIcon className="shrink-0 text-needs-you" />
           <span className="truncate font-medium" title={row.path}>
             {row.name}
           </span>
@@ -68,7 +69,7 @@ export function NeedsYouCallout({
           </span>
           <span className="ml-auto shrink-0 text-xs text-muted">{ago(row.last_sync, now)}</span>
           <IconButton label="Dismiss until it changes" onClick={() => onDismiss(row.path)}>
-            <DismissIcon />
+            <CrossIcon />
           </IconButton>
         </>
       }
@@ -79,7 +80,7 @@ export function NeedsYouCallout({
         {isClearedBySync ? [syncButton, openButton] : [openButton, syncButton]}
         <div className="ml-auto self-center">
           <IconButton label="Settings" onClick={() => onSettings(row.path)}>
-            <SettingsIcon />
+            <SlidersIcon />
           </IconButton>
         </div>
       </div>

@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "dist",
     "beforeBuildCommand": {
-      "script": "npm --prefix ui ci && npm --prefix ui run build",
+      "script": "npm --prefix ../../.. ci && npm --prefix ui run build",
       "cwd": "."
     }
   },

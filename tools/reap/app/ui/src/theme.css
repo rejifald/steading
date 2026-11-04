@@ -1,91 +1,24 @@
 @import "tailwindcss";
+@import "@steading/tray-popover/theme.css";
 
-/* Every token of docs/styleguide.md. Tailwind's own palette, radii, type scale and
-   fonts are cleared first, so a colour or size that is not a token has no utility. */
+/* reap's own tokens (docs/styleguide.md); the shared ones are in the package. */
 @theme {
-  --color-*: initial;
-  --radius-*: initial;
-  --text-*: initial;
-  --font-*: initial;
-  --shadow-*: initial;
-
-  --spacing: 4px;
-
-  --color-surface: #f5f5f7;
-  --color-surface-raised: #ffffff;
-  --color-surface-hover: #ebebf0;
-  --color-border: #d6d6db;
-
-  /* The text tokens: utilities `text-text`, `text-muted`, `text-faint`. */
-  --color-text: #1d1d1f;
-  --color-muted: #55555a;
-  --color-faint: #636368;
-
   --color-accent: #2e7d4f;
-  --color-accent-text: #ffffff;
-  --color-focus: #2f7cf6;
 
   --color-open: #6e6e73;
   --color-removable: #1a6e2f;
   --color-held: #7d5800;
-  --color-needs-you: #b13a08;
 
-  --radius-panel: 12px;
-  --radius-control: 6px;
-  --radius-full: 9999px;
-
-  --font-sans: system-ui, -apple-system, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --text-xs: 11px;
-  --text-xs--line-height: 14px;
-  --text-sm: 13px;
-  --text-sm--line-height: 18px;
-  --text-base: 14px;
-  --text-base--line-height: 20px;
+  /* A removal runs in the removable colour. */
+  --color-progress: var(--color-removable);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-surface: #262628;
-    --color-surface-raised: #2f2f32;
-    --color-surface-hover: #38383b;
-    --color-border: #444448;
-
-    --color-text: #f5f5f7;
-    --color-muted: #b4b4b9;
-    --color-faint: #a3a3a8;
-
     --color-accent: #2e7d4f;
-    --color-accent-text: #ffffff;
-    --color-focus: #5c9dff;
 
     --color-open: #98989d;
     --color-removable: #55c872;
     --color-held: #e0b23c;
-    --color-needs-you: #ff8f55;
   }
-}
-
-/* The window is transparent; only the panel paints. */
-html,
-body,
-#root {
-  height: 100%;
-  margin: 0;
-  background: transparent;
-}
-
-body {
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
-  user-select: none;
-  cursor: default;
-}
-
-/* Base UI injects these as a <style> tag; main.tsx turns that off (CSPProvider) so the
-   content security policy needs no 'unsafe-inline', and they live here instead. */
-.base-ui-disable-scrollbar {
-  scrollbar-width: none;
-}
-.base-ui-disable-scrollbar::-webkit-scrollbar {
-  display: none;
 }

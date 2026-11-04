@@ -16,7 +16,7 @@ needs the owner.
 
 ## Tokens
 
-All tokens live in `app/ui/src/theme.css` under `@theme`, and nothing else defines a raw colour,
+Shared tokens live in `packages/tray-popover/src/theme.css`; `app/ui/src/theme.css` imports it and adds only tether's own. Both use `@theme`, and nothing else defines a raw colour,
 length, radius, shadow or duration. Components use the token utilities (`bg-surface`,
 `text-muted`, `rounded-panel`); an arbitrary value (`bg-[#fff]`, `w-[361px]`) is a bug.
 

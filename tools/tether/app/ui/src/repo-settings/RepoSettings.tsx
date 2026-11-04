@@ -1,9 +1,10 @@
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 
+import { Callout } from "@steading/tray-popover/Callout";
+import { WarningIcon } from "@steading/tray-popover/controls/icons";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
+
 import type { Row, TetherApi } from "../api";
-import { Callout } from "../Callout";
-import { NeedsYouIcon } from "../controls/icons";
-import { TextButton } from "../controls/TextButton";
 import { IntervalSelect } from "../interval/IntervalSelect";
 import { choiceOf, choicesFor } from "../interval/intervals";
 import { ago } from "../repo-list/ago";
@@ -68,7 +69,7 @@ export function RepoSettings({ row, detail, now, api, onDone, onCancel, onPendin
             aria-label={`${row.name} needs you`}
             heading={
               <>
-                <NeedsYouIcon className="shrink-0 text-needs-you" />
+                <WarningIcon className="shrink-0 text-needs-you" />
                 <span className="font-medium">needs you</span>
                 <span className="ml-auto shrink-0 text-xs text-muted">{ago(row.last_sync, now)}</span>
               </>
@@ -152,7 +153,7 @@ export function RepoSettings({ row, detail, now, api, onDone, onCancel, onPendin
               role="alert"
               heading={
                 <>
-                  <NeedsYouIcon className="shrink-0 text-needs-you" />
+                  <WarningIcon className="shrink-0 text-needs-you" />
                   <span className="font-medium">{ERROR_TITLES[error.action]}</span>
                 </>
               }

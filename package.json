@@ -1,0 +1,10 @@
+{
+  "name": "steading",
+  "private": true,
+  "description": "The npm workspace for both popovers and the UI they share; each has its own scripts.",
+  "workspaces": [
+    "packages/tray-popover",
+    "tools/tether/app/ui",
+    "tools/reap/app/ui"
+  ]
+}

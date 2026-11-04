@@ -210,6 +210,7 @@ describe("Popover", () => {
     render(<Popover api={{ ...api, report }} />);
     expect(await screen.findByText("Cannot read repos.toml")).toBeInTheDocument();
     expect(screen.getByText("expected a table at line 3")).toBeInTheDocument();
+    expect(screen.getByText("Fix the file, then try again. Nothing is checked until it reads.")).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByRole("region", { name: "Needs you" })).toBeInTheDocument();
   });

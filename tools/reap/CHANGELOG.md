@@ -38,6 +38,17 @@ All notable changes to this project are documented in this file. The format foll
   header, the space *Ready to remove* frees, the space held by uncommitted changes, and each
   row's size.
 
+- A merged worktree with uncommitted changes is removed once nothing in it has changed for
+  `dirty_grace` (default 7 days) and the usual grace has passed. Its changes are saved first,
+  as one commit under `refs/reap/salvage/<folder>/<YYYYMMDD-HHMMSS>` in the main clone, and
+  checked; only then is it removed with `--force`. A merge, rebase, cherry-pick or revert under
+  way, unmerged paths, an untracked repository inside, or untracked files over
+  `salvage_max_untracked` (default 100 MB) hold it, and its row says which
+  ([ADR dirty-merged-worktrees-are-salvaged](docs/adr/0004-dirty-merged-worktrees-are-salvaged.md)).
+- `git reap salvaged [--json]` lists the saves with the commands that restore each one;
+  `status` and the popover's *Salvaged* section show them too. A sweep deletes a save after
+  `salvage_max_age` (default 30 days).
+
 ### Changed
 
 - The popover groups worktrees by outcome across repos (*Needs you*, *Ready to remove*,

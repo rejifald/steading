@@ -7,6 +7,7 @@ const VARIANTS = {
   inset: "border border-border bg-surface text-text hover:bg-surface-hover",
 } as const;
 
+/** `compact` sits inside a row or a section heading. */
 const SIZES = {
   default: "h-7 font-medium",
   compact: "h-6 font-normal",

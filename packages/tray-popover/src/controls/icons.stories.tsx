@@ -32,7 +32,7 @@ const meta = {
   component: Gallery,
   parameters: { panel: true },
   argTypes: {
-    color: { control: "select", options: ["text", "muted", "faint", "in-sync", "behind", "skipped", "needs-you"] },
+    color: { control: "select", options: ["text", "muted", "faint", "accent", "needs-you"] },
   },
   args: { color: "text" },
 } satisfies Meta<typeof Gallery>;

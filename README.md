@@ -43,8 +43,9 @@ cargo test --workspace --locked
 cargo clippy --workspace --all-targets --locked -- -D warnings
 ```
 
-The Tauri apps build only on macOS; the cores and CLIs also build and test on Linux. Each
-popover is its own npm project under `tools/<tool>/app/ui/`. Commands, layout and commit rules:
+The Tauri apps build only on macOS; the cores and CLIs also build and test on Linux. The
+popovers are one npm workspace (`npm ci` at the root) of `tools/<tool>/app/ui/` and the shared
+[`packages/tray-popover/`](packages/tray-popover/README.md). Commands, layout and commit rules:
 [CLAUDE.md](CLAUDE.md). Why one repository: [ADR 0001](docs/adr/0001-one-repo-builds-tether-and-reap.md).
 
 ## License

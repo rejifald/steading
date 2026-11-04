@@ -1,3 +1,5 @@
+import { PopoverHeader } from "@steading/tray-popover/PopoverHeader";
+
 import type { Report, Snapshot } from "./api";
 import { shownSize, totalSizeOf } from "./shownSize";
 import { OVERALL_LABELS, OVERALL_TONES, StateLabel } from "./StateLabel";
@@ -13,15 +15,17 @@ interface HeaderProps {
 export function Header({ snapshot, title = "reap", showState = true }: HeaderProps) {
   const rightSlot = showState ? summaryOf(snapshot) : null;
   return (
-    <header className="flex items-center gap-2 border-b border-border px-4 py-3">
-      <h1 className="text-base font-semibold text-text">{title}</h1>
-      {showState && (
-        <span className="text-sm text-muted" role="status">
-          <OverallState snapshot={snapshot} />
-        </span>
-      )}
-      {rightSlot && <span className="ml-auto text-xs text-faint">{rightSlot}</span>}
-    </header>
+    <PopoverHeader
+      title={title}
+      state={
+        showState ? (
+          <span className="text-muted">
+            <OverallState snapshot={snapshot} />
+          </span>
+        ) : undefined
+      }
+      aside={rightSlot && <span className="text-xs text-faint">{rightSlot}</span>}
+    />
   );
 }
 

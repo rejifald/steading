@@ -42,8 +42,25 @@ export interface Worktree {
   last_activity?: string;
   /** When a sweep removes it, RFC 3339; only once its grace clock runs, under policy "auto". */
   removes_at?: string;
+  /** When its uncommitted changes, unchanged by then, are saved to a ref and it becomes removable. */
+  saves_at?: string;
   /** The disk space removing it would free; absent when the folder is gone or unreadable. */
   size_bytes?: number;
+}
+
+/** Uncommitted changes saved from a removed worktree, under `refs/reap/salvage/`. */
+export interface Salvaged {
+  refname: string;
+  commit: string;
+  /** The worktree it was saved from, with `~`. */
+  worktree?: string;
+  branch?: string;
+  /** RFC 3339. */
+  saved_at: string;
+  /** When a sweep deletes the ref, RFC 3339; under policy "auto" only. */
+  prunes_at?: string;
+  /** The shell commands that bring the changes back, uncommitted, in a new worktree. */
+  restore: string;
 }
 
 export interface Repo {
@@ -60,6 +77,8 @@ export interface Repo {
   error?: string;
   /** Linked worktrees only, never the main clone. */
   worktrees: Worktree[];
+  /** Saves of removed worktrees' changes, oldest first. */
+  salvaged?: Salvaged[];
 }
 
 export interface Report {

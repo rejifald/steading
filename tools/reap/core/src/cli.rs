@@ -1,5 +1,5 @@
-//! The CLI (rule 14): `git reap status|sweep|add|remove|keep|unkeep|pause|resume`. It reads git
-//! and the config directly; there is no IPC with the tray app.
+//! The CLI (rule 14): `git reap status|sweep|salvaged|add|remove|keep|unkeep|pause|resume`. It
+//! reads git and the config directly; there is no IPC with the tray app.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -14,6 +14,7 @@ use crate::add;
 use crate::ctx::Ctx;
 use crate::paths::Paths;
 use crate::report;
+use crate::salvage;
 use crate::sweep::{self, Outcome};
 
 /// How long an explicit `sweep` waits for another run to release a clone.
@@ -49,6 +50,12 @@ enum Command {
         /// any another run holds; does nothing while paused.
         #[arg(long, conflicts_with = "repo")]
         due: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// The uncommitted changes saved from removed worktrees, and how to restore each (ADR
+    /// dirty-merged-worktrees-are-salvaged).
+    Salvaged {
         #[arg(long)]
         json: bool,
     },
@@ -130,6 +137,14 @@ fn dispatch(command: Command) -> Result<()> {
             due,
             json,
         } => sweep_command(paths, repo.as_deref(), dry_run, due, json)?,
+        Command::Salvaged { json } => {
+            let salvaged = salvage::salvaged(&paths)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&salvaged)?);
+            } else {
+                print!("{}", salvage::render(&salvaged));
+            }
+        }
         Command::Add { path, remote, base } => {
             let listed = add::add(&paths, &path, remote, base)?;
             println!("listed {listed}");
@@ -218,6 +233,11 @@ fn describe(outcome: &Outcome) -> String {
             (None, _) => String::new(),
         };
         lines.push(format!("  removed {}{branch}", removed.path));
+        if let Some(refname) = &removed.salvaged_to {
+            lines.push(format!(
+                "    its uncommitted changes are in {refname}; `git reap salvaged` says how to restore them"
+            ));
+        }
     }
     for refused in &outcome.refused {
         lines.push(format!(
@@ -227,6 +247,9 @@ fn describe(outcome: &Outcome) -> String {
     }
     if outcome.pruned {
         lines.push("  pruned the entries of missing worktrees".into());
+    }
+    for refname in &outcome.pruned_salvage {
+        lines.push(format!("  deleted {refname}, past salvage_max_age"));
     }
     let mut text = lines.join("\n");
     text.push('\n');
@@ -259,6 +282,8 @@ mod tests {
             &["sweep"],
             &["sweep", "app", "--dry-run", "--json"],
             &["sweep", "--due"],
+            &["salvaged"],
+            &["salvaged", "--json"],
             &["keep", "~/Development/app-feat"],
             &["unkeep", "~/Development/app-feat"],
             &["pause"],
