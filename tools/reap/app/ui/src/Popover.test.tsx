@@ -212,7 +212,8 @@ describe("Popover", () => {
     const row = await screen.findByRole("listitem", { name: "fix/login" });
     await user.click(within(row).getByRole("button", { name: "Remove now" }));
     await api.refresh();
-    expect(await screen.findByText("refreshing…", { selector: "[role=status]" })).toBeInTheDocument();
+    // The header keeps "needs you" ahead of "refreshing…", so the footer shows the refresh.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled());
     expect(screen.getByRole("listitem", { name: "fix/login" })).toHaveAttribute("aria-busy", "true");
     expect(within(screen.getByRole("listitem", { name: "fix/login" })).getByText("removing…")).toBeInTheDocument();
   });

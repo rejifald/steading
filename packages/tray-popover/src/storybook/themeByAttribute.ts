@@ -15,7 +15,7 @@ export function themeByAttribute(): Plugin {
   return {
     name: "tray-popover:theme-by-attribute",
     transform(code, id) {
-      if (!id.split("?")[0].endsWith("/src/theme.css")) return null;
+      if (!(id.split("?")[0] ?? id).endsWith("/src/theme.css")) return null;
       // `:root[data-theme="dark"] { & { …tokens } }`: the same tokens, nested under the attribute.
       const rewritten = code.replace(DARK_BLOCK, (_match, space: string) => `:root[data-theme="dark"] {${space}& {`);
       if (rewritten === code) {
