@@ -7,6 +7,7 @@ pub mod classify;
 pub mod cli;
 pub mod config;
 pub mod ctx;
+pub mod discovery;
 pub mod disk_usage;
 pub mod fetch;
 pub mod git;

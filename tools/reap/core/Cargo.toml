@@ -19,6 +19,7 @@ path = "src/bin/git-reap.rs"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
 clap = { version = "4", features = ["derive"] }
+find-clones = { path = "../../../crates/find-clones" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"

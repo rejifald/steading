@@ -1,6 +1,7 @@
 //! `repos.toml` (rules 1, 7, 10, 13 and ADR dirty-merged-worktrees-are-salvaged): one `[[repo]]`
 //! per main clone, with the sweep settings globally and per repo. Nothing in a clone that is not
-//! listed is ever touched.
+//! listed is ever touched. `scan` and `skip` are discovery's (repo ADR 0004) and never widen that:
+//! a found clone is listed only through `add`.
 //!
 //! ```toml
 //! interval = "5m"       # optional, every setting below too
@@ -10,6 +11,8 @@
 //! dirty_grace = "7d"    # a merged worktree with changes: unchanged this long, then saved
 //! salvage_max_untracked = "100MB"
 //! salvage_max_age = "30d"
+//! scan = ["~/Development"]            # where `git reap discover` looks; absent: the usual folders, [] = off
+//! skip = ["~/Development/scratch"]    # clones discovery no longer suggests
 //!
 //! [[repo]]
 //! path = "~/Development/app"
@@ -18,7 +21,7 @@
 //! policy = "ask"        # overrides the global value for this repo
 //! ```
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -101,6 +104,14 @@ pub struct Config {
     pub salvage_max_untracked: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub salvage_max_age: Option<String>,
+    /// The folders discovery walks (repo ADR 0004 rule 4), as written (`~/…` or absolute).
+    /// `None`: the usual ones that exist. `Some([])`: discovery is off. Before `repo`, because
+    /// TOML writes tables last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<Vec<String>>,
+    /// Clones discovery does not suggest (rule 3), as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skip: Vec<String>,
     #[serde(default)]
     pub repo: Vec<RepoEntry>,
 }
@@ -204,6 +215,20 @@ pub fn parse_interval(text: &str) -> Result<Duration> {
     Ok(interval)
 }
 
+fn expand_entries(key: &str, entries: &[String], paths: &Paths) -> Result<Vec<PathBuf>> {
+    entries
+        .iter()
+        .map(|entry| {
+            let path = paths.expand(entry);
+            if path.is_absolute() {
+                Ok(path)
+            } else {
+                bail!("repos.toml {key} entry {entry}: path must be absolute or start with ~/")
+            }
+        })
+        .collect()
+}
+
 impl Config {
     /// Reads `repos.toml`; a missing file is an empty list.
     ///
@@ -231,7 +256,7 @@ impl Config {
         std::fs::create_dir_all(&paths.config)
             .with_context(|| format!("creating {}", paths.config.display()))?;
         let body = format!(
-            "# reap (ADR 0001): one [[repo]] per main clone. Edited by `git reap add` / `git reap remove`.\n\n{}",
+            "# reap (ADR 0001): one [[repo]] per main clone. Edited by `git reap add` / `remove` / `skip` / `unskip`.\n\n{}",
             toml::to_string(self).context("serialising repos.toml")?
         );
         let temporary = file.with_extension("toml.tmp");
@@ -259,6 +284,8 @@ impl Config {
     /// Fails on the first invalid or duplicate entry.
     pub fn repos(&self, paths: &Paths) -> Result<Vec<Repo>> {
         self.interval()?;
+        self.scan_roots(paths)?;
+        self.skipped(paths)?;
         let mut repos: Vec<Repo> = Vec::new();
         for entry in &self.repo {
             let repo = self
@@ -270,6 +297,50 @@ impl Config {
             repos.push(repo);
         }
         Ok(repos)
+    }
+
+    /// The `scan` entries expanded, or `None` while the key is absent.
+    ///
+    /// # Errors
+    ///
+    /// Fails on the first entry that is neither absolute nor `~/…`.
+    pub fn scan_roots(&self, paths: &Paths) -> Result<Option<Vec<PathBuf>>> {
+        self.scan
+            .as_ref()
+            .map(|entries| expand_entries("scan", entries, paths))
+            .transpose()
+    }
+
+    /// The `skip` entries expanded.
+    ///
+    /// # Errors
+    ///
+    /// Fails on the first entry that is neither absolute nor `~/…`.
+    pub fn skipped(&self, paths: &Paths) -> Result<Vec<PathBuf>> {
+        expand_entries("skip", &self.skip, paths)
+    }
+
+    /// Adds `path` to `skip` as written, unless it is there already; whether it was added.
+    pub fn add_skip(&mut self, paths: &Paths, path: &str) -> bool {
+        let target = absolute(&paths.expand(path));
+        if self
+            .skip
+            .iter()
+            .any(|entry| absolute(&paths.expand(entry)) == target)
+        {
+            return false;
+        }
+        self.skip.push(path.to_owned());
+        true
+    }
+
+    /// Takes every entry naming `path` out of `skip`; whether there was one.
+    pub fn remove_skip(&mut self, paths: &Paths, path: &Path) -> bool {
+        let target = absolute(path);
+        let before = self.skip.len();
+        self.skip
+            .retain(|entry| absolute(&paths.expand(entry)) != target);
+        self.skip.len() != before
     }
 
     fn resolve(&self, entry: &RepoEntry, paths: &Paths) -> Result<Repo> {
@@ -445,5 +516,62 @@ mod tests {
         config.save(&paths).unwrap();
 
         assert_eq!(Config::load(&paths).unwrap().repo, config.repo);
+    }
+
+    #[test]
+    fn a_file_without_scan_and_skip_serialises_as_before() {
+        let text = "grace = \"2h\"\n\n[[repo]]\npath = \"~/Development/app\"\n";
+        let config: Config = toml::from_str(text).unwrap();
+
+        assert_eq!(config.scan, None);
+        assert_eq!(config.skip, Vec::<String>::new());
+        assert_eq!(toml::to_string(&config).unwrap(), text);
+    }
+
+    #[test]
+    fn scan_and_skip_round_trip_before_the_repo_tables() {
+        let text = "scan = [\"~/Code\", \"/srv\"]\nskip = [\"~/Code/scratch\"]\n\n[[repo]]\npath = \"/a\"\n";
+        let config: Config = toml::from_str(text).unwrap();
+
+        assert_eq!(toml::to_string(&config).unwrap(), text);
+        let off: Config = toml::from_str("scan = []\n").unwrap();
+        assert_eq!(off.scan, Some(Vec::new()));
+        assert_eq!(toml::to_string(&off).unwrap(), "scan = []\nrepo = []\n");
+    }
+
+    #[test]
+    fn scan_and_skip_entries_expand_and_a_bad_one_fails_the_file() {
+        let paths = Paths::new(Path::new("/Users/me"), Path::new("/c"));
+        let config: Config =
+            toml::from_str("scan = [\"~/Code\", \"/srv\"]\nskip = [\"~/Code/x\"]\n").unwrap();
+        assert_eq!(
+            config.scan_roots(&paths).unwrap().unwrap(),
+            [PathBuf::from("/Users/me/Code"), PathBuf::from("/srv")]
+        );
+        assert_eq!(
+            config.skipped(&paths).unwrap(),
+            [PathBuf::from("/Users/me/Code/x")]
+        );
+        assert!(config.repos(&paths).is_ok());
+
+        for bad in ["scan = [\"code\"]\n", "skip = [\"../x\"]\n"] {
+            let config: Config = toml::from_str(bad).unwrap();
+            let error = config.repos(&paths).unwrap_err().to_string();
+            assert!(error.contains("must be absolute"), "{bad}: {error}");
+            assert!(error.contains(bad.split('"').nth(1).unwrap()), "{error}");
+        }
+    }
+
+    #[test]
+    fn skips_are_added_once_and_removed_by_path() {
+        let paths = Paths::new(Path::new("/Users/me"), Path::new("/c"));
+        let mut config = Config::default();
+
+        assert!(config.add_skip(&paths, "~/Code/x"));
+        assert!(!config.add_skip(&paths, "/Users/me/Code/x"));
+        assert_eq!(config.skip, ["~/Code/x"]);
+        assert!(config.remove_skip(&paths, Path::new("/Users/me/Code/x")));
+        assert!(!config.remove_skip(&paths, Path::new("/Users/me/Code/x")));
+        assert_eq!(config.skip, Vec::<String>::new());
     }
 }
