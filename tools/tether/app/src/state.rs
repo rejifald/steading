@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use serde::Serialize;
 use tether_core::Paths;
+use tether_core::discovery::{self, View};
 use tether_core::report::{self, Report};
 
 use crate::logic::Event;
@@ -29,6 +30,13 @@ pub struct State {
     pub picking: AtomicBool,
     /// When the popover last hid on focus loss (see `logic::reopens`).
     pub hidden_at: Mutex<Option<Instant>>,
+    /// The scan root being walked now (`~/…`); `None` when idle.
+    pub scanning: Mutex<Option<String>>,
+    /// Whether a scan thread is running, so a second *Find clones* is ignored.
+    pub scan_running: AtomicBool,
+    /// Why the last scan failed. Apart from `note`, which the worker clears at the
+    /// start of every round, so the Refresh a scan ends with would erase it.
+    pub scan_note: Mutex<Option<String>>,
 }
 
 /// The `report` event's payload and the `report` command's answer.
@@ -43,6 +51,20 @@ pub struct Snapshot {
     pub note: Option<String>,
     /// Per path, the CLI's own detail line: the skip reason or the commits to pull.
     pub details: BTreeMap<String, String>,
+    /// What the last scan found, for the suggestions (`git tether discover --json`).
+    pub discovery: View,
+}
+
+/// What the popover shows when the roots, `scan` or `skip` cannot be read: the
+/// reason is already in `error`, so there is nothing to list.
+fn empty_view(scanning: Option<String>) -> View {
+    View {
+        scanned_at: None,
+        scanning,
+        roots: Vec::new(),
+        suggestions: Vec::new(),
+        skipped: Vec::new(),
+    }
 }
 
 impl State {
@@ -58,6 +80,9 @@ impl State {
             note: Mutex::new(None),
             picking: AtomicBool::new(false),
             hidden_at: Mutex::new(None),
+            scanning: Mutex::new(None),
+            scan_running: AtomicBool::new(false),
+            scan_note: Mutex::new(None),
         }
     }
 
@@ -77,13 +102,92 @@ impl State {
                 Some((row.path.clone(), line))
             })
             .collect();
+        let scanning = self.scanning.lock().unwrap().clone();
+        let discovery =
+            discovery::view(&self.paths, scanning.clone()).unwrap_or_else(|_| empty_view(scanning));
+        let note = self
+            .note
+            .lock()
+            .unwrap()
+            .clone()
+            .or_else(|| self.scan_note.lock().unwrap().clone());
         Snapshot {
             report,
             error: self.report_error.lock().unwrap().clone(),
             syncing: self.syncing.load(Ordering::SeqCst),
             busy: self.busy.lock().unwrap().clone(),
-            note: self.note.lock().unwrap().clone(),
+            note,
             details,
+            discovery,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+
+    /// A state over a throwaway home and config folder.
+    fn state_in(dir: &Path) -> State {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let home = dir.join("home");
+        let config = dir.join("config");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&config).unwrap();
+        State::new(Paths::new(&home, &config), tx)
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("tether-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_snapshot_carries_discovery_with_the_root_being_walked() {
+        let dir = scratch("snapshot");
+        let state = state_in(&dir);
+        std::fs::write(
+            state.paths.config_file(),
+            "scan = [\"~/Code\"]\nskip = [\"~/Code/old\"]\n",
+        )
+        .unwrap();
+        *state.scanning.lock().unwrap() = Some("~/Code".into());
+        let d = state.snapshot().discovery;
+        assert_eq!(d.scanning.as_deref(), Some("~/Code"));
+        assert_eq!(d.roots.len(), 1);
+        assert_eq!(d.roots[0].path, "~/Code");
+        assert_eq!(d.roots[0].clones, None);
+        assert_eq!(d.skipped.len(), 1);
+        assert_eq!(d.skipped[0].root.as_deref(), Some("~/Code"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_unreadable_repos_toml_leaves_an_empty_discovery_and_keeps_scanning() {
+        let dir = scratch("invalid");
+        let state = state_in(&dir);
+        std::fs::write(state.paths.config_file(), "scan = not toml").unwrap();
+        *state.scanning.lock().unwrap() = Some("~/Code".into());
+        let d = state.snapshot().discovery;
+        assert_eq!(d, empty_view(Some("~/Code".into())));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_scan_failure_shows_as_the_note_until_a_sync_failure_replaces_it() {
+        let dir = scratch("note");
+        let state = state_in(&dir);
+        *state.scan_note.lock().unwrap() = Some("scan failed".into());
+        assert_eq!(state.snapshot().note.as_deref(), Some("scan failed"));
+        // The worker clears `note` every round; the scan's own survives it.
+        *state.note.lock().unwrap() = None;
+        assert_eq!(state.snapshot().note.as_deref(), Some("scan failed"));
+        *state.note.lock().unwrap() = Some("~/r: failed".into());
+        assert_eq!(state.snapshot().note.as_deref(), Some("~/r: failed"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

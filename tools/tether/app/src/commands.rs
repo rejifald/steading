@@ -1,19 +1,23 @@
 //! The Tauri commands behind the popover (ADR 0002 rule 4). None runs git on
 //! the thread that calls it: a sync is only queued for the worker, and the
-//! picker, the branch lookup and `add` run on a blocking thread.
+//! picker, the branch lookup and `add` run on a blocking thread, and a scan
+//! for clones (ADR 0004) on a thread of its own.
 
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
+use find_clones::Bounds;
 use serde::Deserialize;
 use tauri::AppHandle;
-use tether_core::Ctx;
 use tether_core::add::{self, AddOpts};
+use tether_core::config::Config;
 use tether_core::config::{Mode, absolute};
+use tether_core::discovery;
+use tether_core::{Ctx, Paths};
 
-use crate::logic::Event;
+use crate::logic::{self, Event};
 use crate::osascript;
 use crate::state::{Snapshot, State};
 use crate::window;
@@ -166,6 +170,123 @@ pub async fn remove(state: Shared<'_>, path: String) -> Result<(), String> {
         edited(&path, result)
     })
     .await?
+}
+
+/// *Find clones*: starts the walk of the scan roots and returns at once, so the popover is
+/// never blocked. Does nothing while a scan already runs. Progress and the end reach the
+/// popover as ordinary refreshes of the snapshot (`discovery.scanning`), never as an event.
+#[tauri::command]
+// Tauri hands a command its arguments by value; that is its calling convention.
+#[allow(clippy::needless_pass_by_value)]
+pub fn find_clones(state: Shared<'_>) {
+    let state = state.inner().clone();
+    if state.scan_running.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let _done = ScanEnd(&state);
+        *state.scan_note.lock().unwrap() = None;
+        if let Err(e) = scan(&state) {
+            *state.scan_note.lock().unwrap() = Some(format!("{e:#}"));
+        }
+    });
+}
+
+/// Ends a scan however it ends (an error, even a panic): nothing is being walked, a new scan
+/// may start, and the popover refreshes one last time.
+struct ScanEnd<'a>(&'a State);
+
+impl Drop for ScanEnd<'_> {
+    fn drop(&mut self) {
+        *self.0.scanning.lock().unwrap() = None;
+        self.0.scan_running.store(false, Ordering::SeqCst);
+        self.0.send(Event::Refresh);
+    }
+}
+
+/// The walk itself. `scanning` names the root being walked: the first before the walk starts,
+/// then the next each time one is left. A scan takes no per-clone lock; it only reads.
+fn scan(state: &State) -> anyhow::Result<()> {
+    let paths = &state.paths;
+    let config = Config::load(paths)?;
+    let names: Vec<String> = discovery::roots(&config, paths)?
+        .iter()
+        .map(|r| paths.tilde(r))
+        .collect();
+    *state.scanning.lock().unwrap() = names.first().cloned();
+    state.send(Event::Refresh);
+    discovery::scan(paths, &Bounds::default(), &mut |left| {
+        *state.scanning.lock().unwrap() = logic::root_after(&names, left);
+        state.send(Event::Refresh);
+    })?;
+    Ok(())
+}
+
+/// *Add* on a suggestion: tether-core's `add` in `follow` mode on the suggestion's branch, so
+/// every check `add` makes runs and its refusal is returned as it is. Then syncs the clone.
+#[tauri::command]
+pub async fn add_suggestion(state: Shared<'_>, path: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let result = {
+            let _guard = state.work.lock().unwrap();
+            discovery::accept(&Ctx::new(state.paths.clone(), false), &path)
+        };
+        match result {
+            Ok(repo) => {
+                state.send(Event::SyncNow(Some(
+                    state.paths.tilde(&absolute(&repo.path)),
+                )));
+                Ok(())
+            }
+            Err(e) => {
+                state.send(Event::Refresh);
+                Err(format!("{e:#}"))
+            }
+        }
+    })
+    .await?
+}
+
+/// Runs one edit of repos.toml under the lock `add` and `remove` take, then refreshes.
+async fn edit_config(
+    state: Shared<'_>,
+    edit: impl FnOnce(&Paths) -> anyhow::Result<()> + Send + 'static,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let result = {
+            let _guard = state.work.lock().unwrap();
+            edit(&state.paths)
+        };
+        state.send(Event::Refresh);
+        result.map_err(|e| format!("{e:#}"))
+    })
+    .await?
+}
+
+/// *Skip*: never suggest this clone again.
+#[tauri::command]
+pub async fn skip_clone(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_config(state, move |paths| discovery::skip(paths, &path)).await
+}
+
+/// *Unskip*: suggest this clone again.
+#[tauri::command]
+pub async fn unskip_clone(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_config(state, move |paths| discovery::unskip(paths, &path)).await
+}
+
+/// *Add folder…*: another folder to look in. Nothing is scanned until *Look again*.
+#[tauri::command]
+pub async fn add_scan_root(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_config(state, move |paths| discovery::add_root(paths, &path)).await
+}
+
+/// Stops looking in a folder and drops what it showed.
+#[tauri::command]
+pub async fn remove_scan_root(state: Shared<'_>, path: String) -> Result<(), String> {
+    edit_config(state, move |paths| discovery::remove_root(paths, &path)).await
 }
 
 #[tauri::command]
