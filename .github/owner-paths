@@ -3,3 +3,6 @@
 lefthook.yml
 scripts/check-sensitive.sh
 tools/tether/install.sh
+tools/reap/install.sh
+scripts/install-app.sh
+scripts/reinstall.sh

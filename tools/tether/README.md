@@ -20,7 +20,7 @@ one it is the menu-bar app.
 | `core/` | `tether-core`: config, poll, follow, mirror, status. No UI deps. Also builds `git-tether`, the same CLI without Tauri. |
 | `app/` | Tauri v2 menu-bar shell (`tether` binary, also the CLI): tray icon, popover, per-repo timers. |
 | `app/ui/` | The popover: React, Base UI and Tailwind, built with Vite into `app/dist/` ([ADR 0002](docs/adr/0002-the-tray-ui-is-a-react-popover.md), [styleguide](docs/styleguide.md)). |
-| `install.sh` | Build, install to `~/Applications`, link the CLI as `git-tether`, login item; `--uninstall` removes them. |
+| `install.sh` | Build, install to `~/Applications`, link the CLI as `git-tether`, login item; `--uninstall` removes them. The steps are the repo's [`scripts/install-app.sh`](../../scripts/install-app.sh). |
 | `docs/brand/` | The logo and how the app and tray icons derive from it ([brand](docs/brand/README.md)). |
 
 ## Install

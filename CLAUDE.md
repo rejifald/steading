@@ -47,7 +47,7 @@ then into a crate or package named for what it does (never `common` or `shared`)
 | `packages/tray-popover/` | `@steading/tray-popover`: the controls, icons and popover pieces both popovers use. Source-only. [README](packages/tray-popover/README.md), [ADR 0003](docs/adr/0003-the-popovers-share-one-npm-workspace.md). |
 | `tools/<tool>/docs/` | The tool's ADRs, styleguide, brand and design notes. |
 | `docs/adr/` | Decisions that cover the whole repository. |
-| `scripts/` | Repo gates and the SVG renderer both tools' icon scripts use. |
+| `scripts/` | Repo gates, the SVG renderer both tools' icon scripts use, the installer both `install.sh` run, and `reinstall.sh`, tether's `after` that updates the apps. |
 | `package.json`, `package-lock.json` | The npm workspace and its one lockfile; raise a dependency here, once. |
 | `rust-toolchain.toml` | The one Rust version every clone and CI build with; raising it is its own commit. |
 

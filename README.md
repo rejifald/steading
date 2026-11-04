@@ -12,7 +12,26 @@ They install and run independently; use either or both.
 ## Install
 
 Signed releases through Homebrew are on the way. Until then, build from source: you need a Rust
-toolchain, git, and Node.js with npm. Each tool's README has its install steps.
+toolchain, git, and Node.js with npm. Each tool's README has its install steps; both run
+[`scripts/install-app.sh`](scripts/install-app.sh), which builds the app, copies it to
+`~/Applications`, links the `git` subcommand and registers a login item, so the app starts when
+you log in.
+
+## Updates
+
+Let git-tether keep your steading clone on `main` and rebuild the apps whenever it moves:
+
+```bash
+git tether add ~/Development/steading --branch main --after scripts/reinstall.sh
+```
+
+[`scripts/reinstall.sh`](scripts/reinstall.sh) starts in the background and returns at once. It
+waits for the clone's `tether.lock`, so a sync cannot move the tree mid-build, then runs
+`install.sh --yes` for each tool already in `~/Applications`, reap before tether. It runs outside
+tether's process group, because reinstalling tether stops tether. Its output goes to
+`~/Library/Logs/steading/reinstall.log`, and a failure posts a notification. It takes `cargo` and
+`npm` from your interactive login shell's `PATH`, since launchd's has neither. Run it by hand with
+`scripts/reinstall.sh --foreground`.
 
 ## Develop
 

@@ -7,6 +7,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- `install.sh` (ADR 0001 rule 16): builds reap, shows `status` and the first `sweep --dry-run`,
+  asks, then installs the app to `~/Applications`, links `git-reap` and registers the login item;
+  `--dry-run`, `--yes` and `--uninstall`.
 - The spec, [ADR 0001](docs/adr/0001-reap-sweeps-merged-worktrees.md): which worktrees
   reap sees, when one counts as merged, the guards before removal, the grace period and
   *Keep*, and the app's shape.

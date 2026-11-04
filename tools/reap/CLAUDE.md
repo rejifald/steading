@@ -9,6 +9,8 @@ Part of steading: the repo-wide commands, commit rules and owner paths are in th
 
 ## Commands
 
+- `sh -n install.sh` and `./install.sh --dry-run` — installer syntax and dry run (the steps live in
+  `../../scripts/install-app.sh`); never run it without `--dry-run` while developing
 - `scripts/render-icons.sh` — the app and tray icons from `app/icons/src/*.svg`; commit sources and PNGs together
 - `npm ci` at the repository root (never `npm install` inside `app/ui`), then `npm --prefix app/ui run typecheck`, `npm --prefix app/ui test -- --run`, `npm --prefix app/ui run build` — the popover
   ([styleguide](docs/styleguide.md))
