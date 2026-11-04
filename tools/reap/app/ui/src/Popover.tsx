@@ -35,7 +35,14 @@ export function Popover({ api }: { api: ReapApi }) {
 
   const receive = useCallback((next: Snapshot) => {
     setSnapshot(next);
-    setRemoving(NONE_REMOVING);
+    // A refresh starts with a snapshot that still lists the worktree being removed, so a mark
+    // stays until a report no longer lists its worktree.
+    setRemoving((paths) => {
+      if (!next.report || paths.size === 0) return paths;
+      const present = new Set(next.report.repos.flatMap((repo) => repo.worktrees.map((worktree) => worktree.path)));
+      const kept = [...paths].filter((path) => present.has(path));
+      return kept.length === paths.size ? paths : new Set(kept);
+    });
   }, []);
 
   useEffect(() => {

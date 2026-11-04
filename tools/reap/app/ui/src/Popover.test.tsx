@@ -207,6 +207,46 @@ describe("Popover", () => {
     expect(screen.queryByRole("button", { name: /^Remove all/ })).not.toBeInTheDocument();
   });
 
+  it("keeps a row removing when a report still lists its worktree", async () => {
+    const { api, user } = setup({ holdsRemovals: true });
+    const row = await screen.findByRole("listitem", { name: "fix/login" });
+    await user.click(within(row).getByRole("button", { name: "Remove now" }));
+    await api.refresh();
+    expect(await screen.findByText("refreshing…", { selector: "[role=status]" })).toBeInTheDocument();
+    expect(screen.getByRole("listitem", { name: "fix/login" })).toHaveAttribute("aria-busy", "true");
+    expect(within(screen.getByRole("listitem", { name: "fix/login" })).getByText("removing…")).toBeInTheDocument();
+  });
+
+  it("drops the row when a report no longer lists the removed worktree", async () => {
+    const inner = createFakeApi({ holdsRemovals: true });
+    let emit: (snapshot: Snapshot) => void = () => {};
+    const api = {
+      ...inner,
+      onReport: async (handler: (snapshot: Snapshot) => void) => {
+        emit = handler;
+        return inner.onReport(handler);
+      },
+    };
+    const user = userEvent.setup();
+    render(<Popover api={api} />);
+    const row = await screen.findByRole("listitem", { name: "fix/login" });
+    await user.click(within(row).getByRole("button", { name: "Remove now" }));
+    const current = await inner.report();
+    const report = current.report;
+    if (!report) throw new Error("the fake has a report");
+    emit({
+      ...current,
+      report: {
+        ...report,
+        repos: report.repos.map((repo) => ({
+          ...repo,
+          worktrees: repo.worktrees.filter((worktree) => worktree.branch !== "fix/login"),
+        })),
+      },
+    });
+    await waitFor(() => expect(screen.queryByRole("listitem", { name: "fix/login" })).not.toBeInTheDocument());
+  });
+
   it("keeps the last report under a notice when repos.toml stops reading", async () => {
     setup({ repos: [readyRepo(1)], error: "expected `=` at line 4" });
     expect(await screen.findByRole("alert")).toHaveTextContent(
