@@ -8,6 +8,7 @@ export const OUTCOMES: readonly Outcome[] = ["needs-you", "ready", "held", "in-p
 
 const OUTCOME_OF_STATE: Record<State, Outcome> = {
   stale: "needs-you",
+  abandoned: "needs-you",
   refused: "needs-you",
   removable: "ready",
   missing: "ready",

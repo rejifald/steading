@@ -41,6 +41,19 @@ export const ConfirmRemoveAll: Story = {
   },
 };
 
+/** Detached and batch-merged worktrees, found by HEAD's commit (ADR 0006 rule 3(d)). */
+export const FoundByCommit: Story = { name: "Merged, found by commit", args: { scenario: "found-by-commit" } };
+
+/** The saves of abandoned worktrees, opened, with Delete's confirm. */
+export const SavedAbandoned: Story = {
+  name: "Saved abandoned work",
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(await canvas.findByRole("button", { name: /Saved abandoned work/ }));
+    await userEvent.click(canvas.getByRole("button", { name: "Delete" }));
+  },
+};
+
 export const Paused: Story = { args: { scenario: "paused" } };
 
 export const RepoError: Story = { name: "Repo error", args: { scenario: "repo-error" } };

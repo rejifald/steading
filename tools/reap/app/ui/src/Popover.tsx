@@ -17,7 +17,11 @@ const ACTIONS: Record<WorktreeAction, (api: ReapApi, path: string) => Promise<vo
   keep: (api, path) => api.keep(path),
   unkeep: (api, path) => api.unkeep(path),
   "remove-now": (api, path) => api.removeNow(path),
+  "save-and-remove": (api, path) => api.saveAndRemove(path),
 };
+
+/** The actions that take a worktree away, shown as running until the next report drops it. */
+const REMOVALS: ReadonlySet<WorktreeAction> = new Set(["remove-now", "save-and-remove"]);
 
 const NONE_REMOVING: ReadonlySet<string> = new Set();
 
@@ -80,7 +84,7 @@ export function Popover({ api }: { api: ReapApi }) {
 
   const act = useCallback(
     async (action: WorktreeAction, path: string): Promise<boolean> => {
-      if (action !== "remove-now") return run(ACTIONS[action](api, path));
+      if (!REMOVALS.has(action)) return run(ACTIONS[action](api, path));
       setRemoving((paths) => new Set(paths).add(path));
       const isDone = await run(ACTIONS[action](api, path));
       if (!isDone) {
@@ -140,6 +144,7 @@ export function Popover({ api }: { api: ReapApi }) {
           repos={report?.repos ?? []}
           now={now}
           onAction={act}
+          onDeleteSalvaged={(repo, refname) => run(api.deleteSalvaged(repo, refname))}
           removing={removing}
           onAdd={() => setView("add")}
         />

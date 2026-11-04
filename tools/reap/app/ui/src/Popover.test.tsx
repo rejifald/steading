@@ -42,8 +42,8 @@ describe("Popover", () => {
     setup();
     const header = await screen.findByRole("banner");
     expect(within(header).getByText("reap")).toBeInTheDocument();
-    expect(within(header).getByRole("status")).toHaveTextContent("needs you (2)");
-    expect(within(header).getByText("10 worktrees · 2 repos · 4.1 GB")).toBeInTheDocument();
+    expect(within(header).getByRole("status")).toHaveTextContent("needs you (3)");
+    expect(within(header).getByText("11 worktrees · 2 repos · 6.2 GB")).toBeInTheDocument();
   });
 
   it("uses the singular in the header for one worktree in one repo", async () => {
@@ -61,10 +61,11 @@ describe("Popover", () => {
       "Merged, but held",
       "In progress",
       "Kept",
+      "Saved abandoned work",
       "Repositories",
     ]);
     const countOf = (name: string) => within(screen.getByRole("region", { name })).getAllByRole("heading")[0];
-    expect(countOf("Needs you")).toHaveTextContent("Needs you2");
+    expect(countOf("Needs you")).toHaveTextContent("Needs you3");
     expect(countOf("Ready to remove")).toHaveTextContent("Ready to remove2 · 840 MB");
     expect(screen.getByRole("button", { name: /Merged, but held/ })).toHaveTextContent("3");
     expect(screen.getByRole("button", { name: /In progress/ })).toHaveTextContent("2");
@@ -74,7 +75,7 @@ describe("Popover", () => {
   it("lists rows within a section by repo order, then worktree order", async () => {
     setup();
     await screen.findByRole("banner");
-    expect(rowNamesIn("Needs you")).toEqual(["build/old", "feat/redesign"]);
+    expect(rowNamesIn("Needs you")).toEqual(["build/old", "feat/redesign", "docs/pages"]);
     expect(rowNamesIn("Ready to remove")).toEqual(["fix/login", "fix/typo"]);
   });
 
@@ -121,13 +122,78 @@ describe("Popover", () => {
     expect(screen.getByRole("listitem", { name: "feat/api" })).toBeInTheDocument();
   });
 
-  it("lifts a stale worktree into Needs you with its sentence and text buttons", async () => {
+  it("lifts a held stale worktree into Needs you, naming what is local and the guard", async () => {
     setup();
     const row = await screen.findByRole("listitem", { name: "feat/redesign" });
-    expect(within(row).getByText("Pull request #12 closed without merging. reap won’t remove it.")).toBeInTheDocument();
+    expect(
+      within(row).getByText(
+        "Pull request #12 closed without merging · 3 commits on no remote. reap won’t remove it: a process is running inside it.",
+      ),
+    ).toBeInTheDocument();
     expect(within(row).getByText("example-site · 12 d")).toBeInTheDocument();
     expect(within(row).getByRole("button", { name: "Open in Finder" })).toBeInTheDocument();
     expect(within(row).queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Save and remove" })).not.toBeInTheDocument();
+  });
+
+  it("offers Save and remove and Keep on an abandoned worktree", async () => {
+    const { api, user } = setup();
+    const save = vi.spyOn(api, "saveAndRemove");
+    const remove = vi.spyOn(api, "removeNow");
+    const row = await screen.findByRole("listitem", { name: "docs/pages" });
+    expect(
+      within(row).getByText("No commit or checkout for 119 days · 13 uncommitted changes · 22 commits on no remote"),
+    ).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "Keep" })).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Save and remove" }));
+    expect(save).toHaveBeenCalledWith("~/Development/worktrees/docs-pages");
+    expect(remove).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("listitem", { name: "docs/pages" })).not.toBeInTheDocument());
+    await expand(user, /Saved abandoned work/);
+    expect(rowNamesIn("Saved abandoned work")).toEqual(["docs/pages", "old-probe"]);
+  });
+
+  it("reads Saving… while an abandoned worktree is saved", async () => {
+    const { user } = setup({ holdsRemovals: true });
+    const row = await screen.findByRole("listitem", { name: "docs/pages" });
+    await user.click(within(row).getByRole("button", { name: "Save and remove" }));
+    expect(within(row).getByRole("button", { name: "Saving…" })).toBeDisabled();
+  });
+
+  it("retries a failed save of an abandoned worktree with Try again", async () => {
+    const repo: Repo = {
+      name: "app",
+      path: "~/Development/app",
+      base: "origin/main",
+      policy: "auto",
+      worktrees: [
+        {
+          name: "probe",
+          path: "~/Development/worktrees/probe",
+          state: "refused",
+          reason: "no commit or checkout for 30 days · a detached HEAD, but saving and removing it failed: x",
+          local: ["a detached HEAD"],
+        },
+      ],
+    };
+    const { api, user } = setup({ repos: [repo] });
+    const save = vi.spyOn(api, "saveAndRemove");
+    const row = await screen.findByRole("listitem", { name: "probe" });
+    await user.click(within(row).getByRole("button", { name: "Try again" }));
+    expect(save).toHaveBeenCalledWith("~/Development/worktrees/probe");
+  });
+
+  it("deletes an abandoned save only after its confirm", async () => {
+    const { api, user } = setup();
+    const remove = vi.spyOn(api, "deleteSalvaged");
+    await expand(user, /Saved abandoned work/);
+    const row = screen.getByRole("listitem", { name: "old-probe" });
+    expect(within(row).getByText("Saved 3 d ago · kept until you delete it")).toBeInTheDocument();
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    expect(remove).not.toHaveBeenCalled();
+    await user.click(within(row).getByRole("button", { name: "Delete for good" }));
+    expect(remove).toHaveBeenCalledWith("~/Development/example-site", "refs/reap/salvage/old-probe/20261101-090000");
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Saved abandoned work" })).not.toBeInTheDocument());
   });
 
   it("opens a worktree in Finder by its listed path", async () => {

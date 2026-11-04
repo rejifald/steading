@@ -21,6 +21,7 @@ export const STATE_LABELS: Record<State, string> = {
   "in-use": "in use",
   locked: "locked",
   stale: "stale",
+  abandoned: "abandoned",
   missing: "missing",
   kept: "kept",
   refused: "refused",
