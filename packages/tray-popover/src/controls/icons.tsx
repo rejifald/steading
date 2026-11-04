@@ -14,8 +14,8 @@ const base = {
   "aria-hidden": true,
 } as const;
 
-/** Two arrows chasing each other: *Sync now*. */
-export function SyncIcon(props: IconProps) {
+/** Two arrows chasing each other: *Sync now*, *Refresh*. */
+export function RefreshIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M13 6.5A5 5 0 0 0 4 4.2L3 5.5" />
@@ -35,8 +35,8 @@ export function FolderIcon(props: IconProps) {
   );
 }
 
-/** Three sliders: a repo's settings. */
-export function SettingsIcon(props: IconProps) {
+/** Three sliders: settings. */
+export function SlidersIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M2.5 4h3.5M9.5 4h4M2.5 8h7.5M2.5 12h1.5M7.5 12h6" />
@@ -48,7 +48,7 @@ export function SettingsIcon(props: IconProps) {
 }
 
 /** A small down chevron: a select's trigger. */
-export function ChevronIcon(props: IconProps) {
+export function ChevronDownIcon(props: IconProps) {
   return (
     <svg {...base} width={12} height={12} {...props}>
       <path d="M4 6l4 4 4-4" />
@@ -56,8 +56,8 @@ export function ChevronIcon(props: IconProps) {
   );
 }
 
-/** A check in a circle: in sync. */
-export function InSyncIcon(props: IconProps) {
+/** A check in a circle: all is well (tether *in sync*). */
+export function CheckCircleIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <circle cx="8" cy="8" r="6.25" />
@@ -66,8 +66,8 @@ export function InSyncIcon(props: IconProps) {
   );
 }
 
-/** A down arrow into a line: behind. */
-export function BehindIcon(props: IconProps) {
+/** A down arrow into a line: something to pull (tether *behind*). */
+export function ArrowDownToLineIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M8 2.75v7.5M4.75 7.25L8 10.5l3.25-3.25M3.5 13.25h9" />
@@ -75,8 +75,8 @@ export function BehindIcon(props: IconProps) {
   );
 }
 
-/** A minus in a circle: skipped. */
-export function SkippedIcon(props: IconProps) {
+/** A minus in a circle: left alone (tether *skipped*). */
+export function MinusCircleIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <circle cx="8" cy="8" r="6.25" />
@@ -85,8 +85,8 @@ export function SkippedIcon(props: IconProps) {
   );
 }
 
-/** A warning triangle: needs you. */
-export function NeedsYouIcon(props: IconProps) {
+/** A warning triangle: *needs you*. */
+export function WarningIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M8 2.25l6.25 11H1.75z" />
@@ -95,8 +95,8 @@ export function NeedsYouIcon(props: IconProps) {
   );
 }
 
-/** An open arc, spun by its caller: syncing. */
-export function SyncingIcon(props: IconProps) {
+/** An open arc, spun by its caller: something running. */
+export function SpinnerIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M13.25 8A5.25 5.25 0 1 1 8 2.75" />
@@ -105,7 +105,7 @@ export function SyncingIcon(props: IconProps) {
 }
 
 /** Two bars in a circle: paused. */
-export function PausedIcon(props: IconProps) {
+export function PauseCircleIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <circle cx="8" cy="8" r="6.25" />
@@ -114,8 +114,8 @@ export function PausedIcon(props: IconProps) {
   );
 }
 
-/** A dashed circle: a repo not listed yet. */
-export function PendingIcon(props: IconProps) {
+/** A dashed circle: not listed yet. */
+export function DashedCircleIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <circle cx="8" cy="8" r="6.25" strokeDasharray="2 2.4" />
@@ -124,7 +124,7 @@ export function PendingIcon(props: IconProps) {
 }
 
 /** A cross: *Dismiss until it changes*. */
-export function DismissIcon(props: IconProps) {
+export function CrossIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M4.5 4.5l7 7M11.5 4.5l-7 7" />
@@ -137,6 +137,36 @@ export function CheckIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
       <path d="M4 8.5l2.5 2.5 5.5-6" />
+    </svg>
+  );
+}
+
+/** A chevron pointing right: a collapsed section; rotated, an open one. */
+export function ChevronRightIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M6 3.5L10.5 8 6 12.5" />
+    </svg>
+  );
+}
+
+/** A pin: *Keep* and *Unkeep*. */
+export function PinIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M6 2.5h4l-.5 4 2.5 2.5H4l2.5-2.5z" />
+      <path d="M8 9v4.5" />
+    </svg>
+  );
+}
+
+/** A bin: *Remove now*. */
+export function BinIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M3 4.5h10" />
+      <path d="M6.5 4.5V3h3v1.5" />
+      <path d="M4.5 4.5l.7 8.5h5.6l.7-8.5" />
     </svg>
   );
 }

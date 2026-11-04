@@ -46,14 +46,23 @@ jobs:
       - name: Test (cores and CLIs)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: cargo test -p tether-core -p reap-core --locked
+      - name: UI install
+        id: ui-install
+        if: ${{ !cancelled() }}
+        # One npm workspace (root package.json): the shared tray-popover package and both popovers.
+        run: npm ci
+      - name: Shared popover UI
+        if: ${{ !cancelled() && steps.ui-install.outcome == 'success' }}
+        working-directory: packages/tray-popover
+        run: npm run typecheck && npm test -- --run
       - name: tether UI
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ui-install.outcome == 'success' }}
         working-directory: tools/tether/app/ui
-        run: npm ci && npm run typecheck && npm test -- --run && npm run build
+        run: npm run typecheck && npm test -- --run && npm run build
       - name: reap UI
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ui-install.outcome == 'success' }}
         working-directory: tools/reap/app/ui
-        run: npm ci && npm run typecheck && npm test -- --run && npm run build
+        run: npm run typecheck && npm test -- --run && npm run build
 
   apps:
     name: macOS apps
@@ -69,8 +78,9 @@ jobs:
           cargo --version
       - name: Build the popovers
         run: |
-          npm --prefix tools/tether/app/ui ci && npm --prefix tools/tether/app/ui run build
-          npm --prefix tools/reap/app/ui ci && npm --prefix tools/reap/app/ui run build
+          npm ci
+          npm --prefix tools/tether/app/ui run build
+          npm --prefix tools/reap/app/ui run build
       - name: Lint (apps)
         run: cargo clippy -p tether-app -p reap-app --all-targets --locked -- -D warnings
       - name: Test (apps)

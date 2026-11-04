@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 
+import { DashedCircleIcon } from "@steading/tray-popover/controls/icons";
+
 import type { Health, Mode } from "./api";
-import { PendingIcon } from "./controls/icons";
 import { GLYPHS, GLYPH_CLASSES, StateLabel, glyphOf } from "./StateLabel";
 
 interface RepoLineProps {
@@ -62,7 +63,7 @@ export function RepoLine({
 }
 
 function LeadingGlyph({ health, busy, paused }: { health?: Health | undefined; busy: boolean; paused: boolean }) {
-  if (!health) return <PendingIcon className="shrink-0 text-faint" />;
+  if (!health) return <DashedCircleIcon className="shrink-0 text-faint" />;
   const glyph = glyphOf(health, busy, paused);
   const Icon = GLYPHS[glyph];
   return <Icon className={`shrink-0 ${GLYPH_CLASSES[glyph]}`} />;

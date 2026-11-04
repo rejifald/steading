@@ -1,4 +1,4 @@
-import { TextButton } from "../controls/TextButton";
+import { TextButton } from "@steading/tray-popover/controls/TextButton";
 import { WorktreeLine } from "./WorktreeLine";
 
 interface EmptyStateProps {

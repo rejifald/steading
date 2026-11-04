@@ -1,19 +1,10 @@
 import { render } from "@testing-library/react";
+import type { ComponentType, SVGProps } from "react";
 import { describe, expect, it } from "vitest";
 
-import {
-  BehindIcon,
-  CheckIcon,
-  DismissIcon,
-  InSyncIcon,
-  NeedsYouIcon,
-  PausedIcon,
-  PendingIcon,
-  SkippedIcon,
-  SyncingIcon,
-} from "./icons";
+import * as icons from "./icons";
 
-const ICONS = { InSyncIcon, BehindIcon, SkippedIcon, NeedsYouIcon, SyncingIcon, PausedIcon, PendingIcon, DismissIcon, CheckIcon };
+const ICONS = icons as Record<string, ComponentType<SVGProps<SVGSVGElement>>>;
 
 describe("icons", () => {
   it.each(Object.entries(ICONS))("%s is hidden from assistive technology", (_, Icon) => {

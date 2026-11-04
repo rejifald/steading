@@ -17,4 +17,10 @@ describe("TextButton", () => {
     expect(classes).toContain("bg-surface-raised");
     expect(classes).not.toContain("bg-surface");
   });
+
+  it("is shorter and lighter at the compact size", () => {
+    render(<TextButton size="compact">Compact</TextButton>);
+    const classes = screen.getByRole("button", { name: "Compact" }).className.split(" ");
+    expect(classes).toEqual(expect.arrayContaining(["h-6", "font-normal"]));
+  });
 });

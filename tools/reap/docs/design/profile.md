@@ -5,7 +5,9 @@ design-handover). One surface: the menu-bar popover in `app/ui/`.
 
 ## Tokens
 
-- Source: `app/ui/src/theme.css` (`@theme`), documented in `docs/styleguide.md`.
+- Shared tokens: `packages/tray-popover/src/theme.css`. `app/ui/src/theme.css` (`@theme`)
+  imports it and adds only reap's own (`--color-accent`, `--color-open`, `--color-removable`,
+  `--color-held`, `--color-progress`). Documented in `docs/styleguide.md`.
 - Tailwind v4, CSS-first. Tailwind's own palette, radii, type scale and fonts are cleared, so
   only tokens have utilities: `bg-surface`, `text-muted`, `rounded-control`, `text-xs`.
 - Forbidden: arbitrary values (`bg-[#fff]`, `w-[361px]`), `style=` except for runtime values.
@@ -13,18 +15,22 @@ design-handover). One surface: the menu-bar popover in `app/ui/`.
 
 ## Components
 
-- No shared package. Everything lives in `app/ui/src/`, grouped by feature:
-  `controls/` (TextButton, IconButton, icons), `worktree-list/`, `add-form/`, and the
-  top-level `Header`, `Footer`, `StateLabel`, `ReadError`.
+- Shared with git-tether, from `@steading/tray-popover` (`packages/tray-popover/`): TextButton,
+  IconButton, icons (named by shape), Callout, ProgressLine, NoticeStrip, ReadError,
+  PopoverHeader, PopoverFooter, PopoverFrame. Import as `@steading/tray-popover/<File>`.
+- Reap's own, in `app/ui/src/`, grouped by feature: `worktree-list/`, `add-form/`, and the
+  top-level `Header`, `Footer`, `Popover`, `StateLabel`.
 - Interactive primitives come from Base UI (`@base-ui/react/*`); never a `div` with a click
   handler.
-- A new component goes beside its only caller; registering one costs nothing beyond the import.
+- A new component used by both tools goes in the package; one used by reap goes beside its only
+  caller in `app/ui/src/`.
 
 ## Tests
 
 - Vitest + Testing Library on jsdom: `npm --prefix app/ui test -- --run`. Tests sit beside the
   source (`*.test.tsx`). Popover-level behaviour is in `src/Popover.test.tsx` against
-  `createFakeApi()` (`src/api.fake.ts`).
+  `createFakeApi()` (`src/api.fake.ts`). The shared pieces are tested in the package:
+  `npm --prefix packages/tray-popover test -- --run`.
 - No visual-regression or a11y harness yet.
 
 ## Viewport

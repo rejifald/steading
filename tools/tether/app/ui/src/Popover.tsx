@@ -1,20 +1,21 @@
-import { Tooltip } from "@base-ui/react/tooltip";
 import { useCallback, useEffect, useState } from "react";
+
+import { NoticeStrip } from "@steading/tray-popover/NoticeStrip";
+import { PopoverFrame } from "@steading/tray-popover/PopoverFrame";
+import { ReadError } from "@steading/tray-popover/ReadError";
 
 import { AddForm } from "./add-form/AddForm";
 import type { Snapshot, TetherApi } from "./api";
 import { Footer } from "./Footer";
 import { Header } from "./Header";
-import { NoticeStrip } from "./NoticeStrip";
+import { noticeOf } from "./noticeOf";
 import { LoadingRows } from "./repo-list/LoadingRows";
-import { ReadError } from "./ReadError";
 import { RepoSettings } from "./repo-settings/RepoSettings";
 import { RepoList } from "./repo-list/RepoList";
 import { useDismissed } from "./repo-list/useDismissed";
 
 /** How often "3 min ago" is recomputed while the popover is open. */
 const CLOCK_TICK = 30_000;
-const TOOLTIP_DELAY = 400;
 
 /** What fills the window between header and footer. */
 type View = { kind: "list" } | { kind: "add" } | { kind: "settings"; path: string };
@@ -126,7 +127,16 @@ export function Popover({ api }: { api: TetherApi }) {
         </>
       );
     }
-    if (readError) return <ReadError message={readError} onRetry={() => void retry()} />;
+    if (readError) {
+      return (
+        <ReadError
+          title="Cannot read repos.toml"
+          message={readError}
+          hint="Fix the file, then try again. Nothing syncs until it reads."
+          onRetry={() => void retry()}
+        />
+      );
+    }
     return (
       <>
         <RepoList
@@ -158,8 +168,7 @@ export function Popover({ api }: { api: TetherApi }) {
   const isPending = isFormPending || (isListShown && (snapshot?.syncing ?? false));
 
   return (
-    <Tooltip.Provider delay={TOOLTIP_DELAY}>
-      <main className="flex h-full max-h-full flex-col overflow-hidden rounded-panel border border-border bg-surface text-sm text-text">
+    <PopoverFrame>
         <Header
           snapshot={snapshot}
           now={now}
@@ -169,13 +178,14 @@ export function Popover({ api }: { api: TetherApi }) {
           {...(isListShown && isEmptyList ? { showState: false } : {})}
         />
         <NoticeStrip
-          actionError={actionError}
-          note={snapshot?.note ?? null}
-          staleError={readError ? null : (snapshot?.error ?? null)}
+          text={noticeOf({
+            actionError,
+            note: snapshot?.note ?? null,
+            staleError: readError ? null : (snapshot?.error ?? null),
+          })}
         />
         {body}
-      </main>
-    </Tooltip.Provider>
+    </PopoverFrame>
   );
 }
 

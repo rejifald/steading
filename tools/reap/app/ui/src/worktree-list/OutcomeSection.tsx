@@ -2,7 +2,7 @@ import { Button } from "@base-ui/react/button";
 import { Collapsible } from "@base-ui/react/collapsible";
 import { Children, type ReactNode, useState } from "react";
 
-import { ChevronIcon } from "../controls/icons";
+import { ChevronRightIcon } from "@steading/tray-popover/controls/icons";
 import { DOT_COLOURS } from "../StateLabel";
 import { type Outcome, OUTCOME_TONES } from "./outcomeOf";
 
@@ -73,7 +73,7 @@ export function OutcomeSection({
           <Collapsible.Trigger
             className={`group flex min-h-8 w-full flex-wrap items-center gap-x-2 border-t border-border px-4 py-1.5 text-sm hover:bg-surface-hover ${FOCUS_RING}`}
           >
-            <ChevronIcon className="shrink-0 text-muted group-data-panel-open:rotate-90" />
+            <ChevronRightIcon className="shrink-0 text-muted group-data-panel-open:rotate-90" />
             <Dot outcome={outcome} />
             <span className="font-semibold whitespace-nowrap text-text">{title}</span>
             <span className="text-faint">{count}</span>

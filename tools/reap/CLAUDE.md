@@ -10,7 +10,7 @@ Part of steading: the repo-wide commands, commit rules and owner paths are in th
 ## Commands
 
 - `scripts/render-icons.sh` — the app and tray icons from `app/icons/src/*.svg`; commit sources and PNGs together
-- `npm --prefix app/ui ci`, then `run typecheck`, `test -- --run`, `run build` — the popover
+- `npm ci` at the repository root (never `npm install` inside `app/ui`), then `npm --prefix app/ui run typecheck`, `npm --prefix app/ui test -- --run`, `npm --prefix app/ui run build` — the popover
   ([styleguide](docs/styleguide.md))
 
 ## Safety rules for code
