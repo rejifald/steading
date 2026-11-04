@@ -1,8 +1,8 @@
 import { ScrollArea } from "@base-ui/react/scroll-area";
+import type { ReactNode } from "react";
 
 import type { Row } from "../api";
 import { CalloutStack } from "./CalloutStack";
-import { EmptyState } from "./EmptyState";
 import { RepoRow } from "./RepoRow";
 import { sortRows } from "./sortRows";
 
@@ -18,12 +18,15 @@ interface RepoListProps {
   onOpen: (path: string) => void;
   onSettings: (path: string) => void;
   onDismiss: (path: string) => void;
-  onAdd: () => void;
+  /** The body when nothing is listed and there is no `found` section. */
+  empty: ReactNode;
+  /** The Found section, under the rows in the same scroll area (and alone when nothing is listed). */
+  found?: ReactNode;
 }
 
 /**
  * The scrolling middle of the popover: the stack of callouts for repos that need you, then one
- * line per repo, dismissed needs-you repos first.
+ * line per repo, dismissed needs-you repos first, then the Found section.
  */
 export function RepoList({
   rows,
@@ -36,9 +39,10 @@ export function RepoList({
   onOpen,
   onSettings,
   onDismiss,
-  onAdd,
+  empty,
+  found,
 }: RepoListProps) {
-  if (rows.length === 0) return <EmptyState onAdd={onAdd} />;
+  if (rows.length === 0 && !found) return <>{empty}</>;
   const sorted = sortRows(rows);
   const isCallout = (row: Row) => row.health === "needs-you" && !isDismissed(row.path);
   const callouts = sorted.filter(isCallout);
@@ -80,6 +84,7 @@ export function RepoList({
             ))}
           </ul>
         )}
+        {found}
       </ScrollArea.Viewport>
       <ScrollArea.Scrollbar className="flex w-2 justify-center py-1 opacity-0 data-hovering:opacity-100 data-scrolling:opacity-100">
         <ScrollArea.Thumb className="w-full rounded-full bg-border" />

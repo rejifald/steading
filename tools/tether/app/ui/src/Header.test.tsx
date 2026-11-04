@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { Row, Snapshot } from "./api";
+import { noDiscovery } from "./api.fake";
 import { Header } from "./Header";
 
 const NOW = new Date("2026-11-01T12:00:00Z");
@@ -33,6 +34,7 @@ function snapshot(fields: Partial<Snapshot> = {}, repos: Row[] = seven, paused =
     busy: [],
     note: null,
     details: {},
+    discovery: noDiscovery(),
     ...fields,
   };
 }
@@ -91,5 +93,44 @@ describe("Header", () => {
     expect(screen.getByRole("heading", { name: repo.name })).toHaveClass("truncate");
     expect(screen.getByRole("banner")).toHaveTextContent("behind · 12");
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  describe("with nothing listed", () => {
+    const found = (suggestions: number, scanning: string | null) =>
+      snapshot(
+        {
+          discovery: {
+            ...noDiscovery(),
+            scanning,
+            suggestions: Array.from({ length: suggestions }, (_, i) => ({
+              path: `~/Code/c${i}`,
+              name: `c${i}`,
+              root: "~/Code",
+              branch: "main",
+            })),
+          },
+        },
+        [],
+      );
+
+    it("counts the suggestions", () => {
+      render(<Header snapshot={found(6, null)} now={NOW} showState={false} showFound />);
+      expect(screen.getByText("6 found")).toBeInTheDocument();
+    });
+
+    it("says 0 found while a scan has found nothing yet", () => {
+      render(<Header snapshot={found(0, "~/Code")} now={NOW} showState={false} showFound />);
+      expect(screen.getByText("0 found")).toBeInTheDocument();
+    });
+
+    it("says nothing when there are no suggestions and no scan", () => {
+      render(<Header snapshot={found(0, null)} now={NOW} showState={false} showFound />);
+      expect(screen.queryByText(/found/)).not.toBeInTheDocument();
+    });
+
+    it("keeps the count out of views that show the title alone", () => {
+      render(<Header snapshot={found(6, null)} now={NOW} showState={false} />);
+      expect(screen.queryByText(/found/)).not.toBeInTheDocument();
+    });
   });
 });

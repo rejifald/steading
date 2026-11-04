@@ -1,4 +1,14 @@
-import type { AddRequest, Report, Row, Snapshot, TetherApi } from "./api";
+import type {
+  AddRequest,
+  Discovery,
+  Report,
+  RootInfo,
+  Row,
+  Snapshot,
+  SkippedClone,
+  Suggestion,
+  TetherApi,
+} from "./api";
 import { DEFAULT_INTERVAL_SECONDS } from "./interval/intervals";
 
 /** How long a fake sync takes, so the busy state is visible in a browser. */
@@ -14,6 +24,45 @@ export const row = (fields: Partial<Row> & Pick<Row, "name" | "path">): Row => (
   interval_seconds: 300,
   health: "in-sync",
   ...fields,
+});
+
+export const suggestion = (name: string, root = "~/Development", branch = "main"): Suggestion => ({
+  path: `${root}/${name}`,
+  name,
+  root,
+  branch,
+});
+
+/** What a fake scan finds in one root. */
+export interface ScanResult {
+  suggestions: Suggestion[];
+  /** Clones the walk saw; defaults to the number of suggestions. */
+  clones?: number;
+  error?: string;
+  stopped_early?: boolean;
+}
+
+/** The scan roots a fake starts with: two of the defaults. */
+export const DEFAULT_ROOTS = ["~/Development", "~/Code"];
+
+/** What a fake scan finds when the options say nothing: five clones in two roots. */
+const DEFAULT_SCAN: Record<string, ScanResult> = {
+  "~/Development": {
+    suggestions: [suggestion("cache"), suggestion("queue"), suggestion("search", "~/Development", "develop")],
+  },
+  "~/Code": { suggestions: [suggestion("notes", "~/Code"), suggestion("wiki", "~/Code")] },
+};
+
+/** How long a fake scan spends in each root, so the streaming is visible in a browser. */
+const FAKE_SCAN_STEP = 700;
+
+/** Before any scan: nothing found, the default roots not yet covered. */
+export const noDiscovery = (roots = DEFAULT_ROOTS): Discovery => ({
+  scanned_at: null,
+  scanning: null,
+  roots: roots.map((path) => ({ path, clones: null, stopped_early: false, error: null })),
+  suggestions: [],
+  skipped: [],
 });
 
 /** One repo in every state, with the CLI's own detail lines. */
@@ -81,6 +130,14 @@ export interface FakeOptions {
   pendingActions?: boolean;
   /** Add, save and remove fail with this text: the error callouts. */
   rejectWith?: string;
+  /** What discovery holds when the popover opens; fields not given are as before any scan. */
+  discovery?: Partial<Discovery>;
+  /** What *Find clones* finds per root; roots without an entry yield nothing. */
+  scanResults?: Record<string, ScanResult>;
+  /** Milliseconds a fake scan spends in each root. */
+  scanStep?: number;
+  /** *Add* on a suggestion fails with this text (`add`'s own error), and the row stays. */
+  suggestionAddFails?: string;
 }
 
 /** An in-memory app for tests and for `npm run dev` in a plain browser. */
@@ -95,6 +152,30 @@ export function createFakeApi(options: FakeOptions = {}): TetherApi {
   const pickedFolder =
     options.pickedFolder === undefined ? "~/Development/example-new" : options.pickedFolder;
   const handlers = new Set<(s: Snapshot) => void>();
+
+  const initial = { ...noDiscovery(options.discovery?.roots?.map((r) => r.path)), ...options.discovery };
+  let scanRoots = initial.roots.map((r) => r.path);
+  const outcomes = new Map<string, Omit<RootInfo, "path">>(
+    initial.roots.map(({ path, ...outcome }) => [path, outcome]),
+  );
+  let found: Suggestion[] = initial.suggestions;
+  let skipped: SkippedClone[] = initial.skipped;
+  let scannedAt = initial.scanned_at;
+  let scanning = initial.scanning;
+
+  /** What the app sends: the listed and skipped clones are filtered out as the core's `view` does. */
+  const discovery = (): Discovery => ({
+    scanned_at: scannedAt,
+    scanning,
+    roots: scanRoots.map((path) => ({
+      path,
+      ...(outcomes.get(path) ?? { clones: null, stopped_early: false, error: null }),
+    })),
+    suggestions: found.filter(
+      (s) => !rows.some((r) => r.path === s.path) && !skipped.some((k) => k.path === s.path),
+    ),
+    skipped,
+  });
 
   const snapshot = (): Snapshot => ({
     report:
@@ -111,6 +192,7 @@ export function createFakeApi(options: FakeOptions = {}): TetherApi {
     busy,
     note,
     details,
+    discovery: discovery(),
   });
   const emit = () => handlers.forEach((h) => h(snapshot()));
   /** Runs a form's action, unless the options hold it pending or refuse it. */
@@ -186,6 +268,79 @@ export function createFakeApi(options: FakeOptions = {}): TetherApi {
         emit();
       }),
     openInFinder: async () => {},
+    findClones: async () => {
+      if (scanning !== null) return;
+      const results = options.scanResults ?? DEFAULT_SCAN;
+      const step = options.scanStep ?? FAKE_SCAN_STEP;
+      const roots = [...scanRoots];
+      found = [];
+      scannedAt = null;
+      outcomes.clear();
+      const walk = (index: number) => {
+        const root = roots[index];
+        if (root === undefined) {
+          scanning = null;
+          scannedAt = new Date().toISOString();
+          emit();
+          return;
+        }
+        scanning = root;
+        emit();
+        setTimeout(() => {
+          const result = results[root] ?? { suggestions: [] };
+          found = [...found, ...result.suggestions];
+          outcomes.set(root, {
+            clones: result.error === undefined ? (result.clones ?? result.suggestions.length) : null,
+            stopped_early: result.stopped_early ?? false,
+            error: result.error ?? null,
+          });
+          walk(index + 1);
+        }, step);
+      };
+      walk(0);
+    },
+    addSuggestion: (path) => {
+      if (options.suggestionAddFails) return Promise.reject(options.suggestionAddFails);
+      return act(() => {
+        const wanted = discovery().suggestions.find((s) => s.path === path);
+        if (!wanted) throw `${path} is no longer a suggestion`;
+        rows = [...rows, row({ name: wanted.name, path, branch: wanted.branch })];
+        busy = [...busy, path];
+        emit();
+        setTimeout(() => {
+          const now = new Date().toISOString();
+          rows = rows.map((r) => (r.path === path ? { ...r, last_sync: now } : r));
+          busy = busy.filter((p) => p !== path);
+          emit();
+        }, FAKE_SYNC_TIME);
+      });
+    },
+    skipClone: (path) =>
+      act(() => {
+        if (skipped.some((k) => k.path === path)) return;
+        const name = path.split("/").pop() ?? path;
+        const root =
+          [...scanRoots].sort((a, b) => b.length - a.length).find((r) => path.startsWith(`${r}/`)) ?? null;
+        skipped = [...skipped, { path, name, root }];
+        emit();
+      }),
+    unskipClone: (path) =>
+      act(() => {
+        skipped = skipped.filter((k) => k.path !== path);
+        emit();
+      }),
+    addScanRoot: (path) =>
+      act(() => {
+        if (!scanRoots.includes(path)) scanRoots = [...scanRoots, path];
+        emit();
+      }),
+    removeScanRoot: (path) =>
+      act(() => {
+        scanRoots = scanRoots.filter((r) => r !== path);
+        outcomes.delete(path);
+        found = found.filter((s) => s.root !== path);
+        emit();
+      }),
     hide: async () => {},
     quit: async () => {},
   };
