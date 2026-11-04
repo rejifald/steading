@@ -198,13 +198,14 @@ fn sweep_command(
         println!("paused: nothing swept");
     }
     for outcome in &outcomes {
-        print!("{}", describe(outcome));
+        print!("{}", describe(outcome, dry_run));
     }
     Ok(())
 }
 
-/// What a pass did to one repo, for the terminal.
-fn describe(outcome: &Outcome) -> String {
+/// What a pass did to one repo, for the terminal. A dry run's outcome holds what the pass would
+/// have done, so its lines say `would`: they must never read as a removal that happened.
+fn describe(outcome: &Outcome, dry_run: bool) -> String {
     let mut lines = vec![outcome.repo.clone()];
     if let Some(why) = &outcome.skipped {
         lines.push(format!("  skipped: {why}"));
@@ -221,12 +222,27 @@ fn describe(outcome: &Outcome) -> String {
             || "on confirm".to_string(),
             |time| format!("at {}", local_time(time)),
         );
+        let removes = if dry_run { "would remove" } else { "removes" };
         lines.push(format!(
-            "  removable {}: {}; removes {when}",
+            "  removable {}: {}; {removes} {when}",
             started.path, started.reason
         ));
     }
     for removed in &outcome.removed {
+        if dry_run {
+            // A dry run never asks git about the branch, so it cannot say whether git keeps it.
+            let branch = removed
+                .branch
+                .as_ref()
+                .map_or_else(String::new, |branch| format!(", then its branch {branch}"));
+            lines.push(format!("  would remove {}{branch}", removed.path));
+            if let Some(refname) = &removed.salvaged_to {
+                lines.push(format!(
+                    "    its uncommitted changes would be saved to {refname} first"
+                ));
+            }
+            continue;
+        }
         let branch = match (&removed.branch, &removed.branch_kept) {
             (Some(branch), Some(why)) => format!("; branch {branch} kept: {why}"),
             (Some(branch), None) => format!(" and its branch {branch}"),
@@ -248,8 +264,9 @@ fn describe(outcome: &Outcome) -> String {
     if outcome.pruned {
         lines.push("  pruned the entries of missing worktrees".into());
     }
+    let deleted = if dry_run { "would delete" } else { "deleted" };
     for refname in &outcome.pruned_salvage {
-        lines.push(format!("  deleted {refname}, past salvage_max_age"));
+        lines.push(format!("  {deleted} {refname}, past salvage_max_age"));
     }
     let mut text = lines.join("\n");
     text.push('\n');
@@ -291,6 +308,64 @@ mod tests {
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
         }
+    }
+
+    /// A pass that removed a salvaged worktree, started a clock and deleted an old save.
+    fn acted() -> Outcome {
+        Outcome {
+            repo: "~/Development/app".into(),
+            skipped: None,
+            fetch_note: None,
+            started: vec![sweep::Started {
+                path: "~/Development/app-next".into(),
+                reason: "merged into origin/main".into(),
+                removes_at: None,
+            }],
+            removed: vec![sweep::Removed {
+                path: "~/Development/app-feat".into(),
+                branch: Some("feat".into()),
+                branch_kept: None,
+                salvaged_to: Some("refs/reap/salvage/feat".into()),
+            }],
+            refused: Vec::new(),
+            pruned: false,
+            pruned_salvage: vec!["refs/reap/salvage/old".into()],
+            log: Vec::new(),
+            report: report::RepoReport {
+                name: "app".into(),
+                path: "~/Development/app".into(),
+                base: "origin/main".into(),
+                policy: crate::config::Policy::Auto,
+                gh_note: None,
+                error: None,
+                worktrees: Vec::new(),
+                salvaged: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_dry_run_says_what_it_would_do_never_what_it_did() {
+        let text = describe(&acted(), true);
+
+        for done in ["removed", "removes", "deleted", " are in "] {
+            assert!(!text.contains(done), "{done:?} in a dry run:\n{text}");
+        }
+        assert!(text.contains("would remove ~/Development/app-feat, then its branch feat"));
+        assert!(text.contains("would be saved to refs/reap/salvage/feat"));
+        assert!(text.contains("would remove on confirm"));
+        assert!(text.contains("would delete refs/reap/salvage/old"));
+    }
+
+    #[test]
+    fn a_real_pass_says_what_it_did() {
+        let text = describe(&acted(), false);
+
+        assert!(text.contains("removed ~/Development/app-feat and its branch feat"));
+        assert!(text.contains("uncommitted changes are in refs/reap/salvage/feat"));
+        assert!(text.contains("removes on confirm"));
+        assert!(text.contains("deleted refs/reap/salvage/old"));
+        assert!(!text.contains("would"));
     }
 
     #[test]
