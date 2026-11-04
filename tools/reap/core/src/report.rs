@@ -11,13 +11,14 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 
-use crate::classify::{self, Dirt, Facts, InUse, Merge, State};
+use crate::classify::{self, Dirt, Facts, InUse, Merge, Rules, State};
 use crate::config::{Config, Policy, Repo};
 use crate::disk_usage;
 use crate::git;
 use crate::github::{self, PullRequest, PullRequestState, PullRequests};
 use crate::in_use::WorkingDirectories;
 use crate::paths::Paths;
+use crate::salvage::{self, Salvaged};
 use crate::state_file::{self, RepoMemory};
 use crate::worktree_list::{self, Worktree};
 
@@ -63,6 +64,10 @@ pub struct Row {
     /// its grace clock, under `policy = "auto"` only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub removes_at: Option<String>,
+    /// When its uncommitted changes will have been unchanged long enough to be saved to a ref
+    /// and it becomes removable, RFC 3339 (ADR dirty-merged-worktrees-are-salvaged).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub saves_at: Option<String>,
     /// The disk space removing it would free; absent when the folder is gone or unreadable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
@@ -84,6 +89,9 @@ pub struct RepoReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub worktrees: Vec<Row>,
+    /// The saves of removed worktrees' changes, oldest first (ADR
+    /// dirty-merged-worktrees-are-salvaged).
+    pub salvaged: Vec<Salvaged>,
 }
 
 /// The tray's three icon states (rule 15).
@@ -185,6 +193,7 @@ pub(crate) fn unreadable(paths: &Paths, repo: &Repo, error: &anyhow::Error) -> R
         gh_note: None,
         error: Some(format!("{error:#}")),
         worktrees: Vec::new(),
+        salvaged: Vec::new(),
     }
 }
 
@@ -346,6 +355,10 @@ pub(crate) fn inspect(
         .collect();
     let (rows, inspected): (Vec<Row>, Vec<Inspected>) =
         linked.iter().map(|worktree| pass.row(worktree)).unzip();
+    let salvaged = salvage::list(paths, repo)?
+        .into_iter()
+        .map(|(salvaged, _)| salvaged)
+        .collect();
     Ok(Inspection {
         report: RepoReport {
             name: repo.name(),
@@ -355,6 +368,7 @@ pub(crate) fn inspect(
             gh_note: prepared.gh_note.clone(),
             error: None,
             worktrees: rows,
+            salvaged,
         },
         worktrees: inspected,
     })
@@ -428,12 +442,16 @@ impl Pass<'_> {
                 .refusal(&key, head)
                 .map(|refusal| refusal.message.clone());
         }
-        let (state, reason) = classify::classify(
-            &facts,
-            &shown(self.base_ref),
-            self.repo.stale_after,
-            self.now,
-        );
+        let base = shown(self.base_ref);
+        let rules = Rules {
+            base: &base,
+            stale_after: self.repo.stale_after,
+            dirty_grace: self.repo.dirty_grace,
+        };
+        let (state, reason) = classify::classify(&facts, &rules, self.now);
+        let saves_at = (state == State::Dirty)
+            .then(|| classify::saves_at(&facts, self.repo.dirty_grace, self.now))
+            .flatten();
         let removes_at = matches!(state, State::Removable | State::Missing)
             .then_some(())
             .filter(|()| self.repo.policy == Policy::Auto)
@@ -460,6 +478,7 @@ impl Pass<'_> {
             reason,
             last_activity: facts.last_activity.map(rfc3339),
             removes_at: removes_at.map(rfc3339),
+            saves_at: saves_at.map(rfc3339),
             size_bytes: None,
         };
         let inspected = Inspected {
@@ -526,6 +545,14 @@ impl Pass<'_> {
                 Err(why) => InUse::Unknown(why.clone()),
             };
         }
+        if facts.merge.is_some() && facts.dirt == Some(Dirt::Changes) {
+            facts.salvage = Some(salvage::check(
+                self.paths,
+                &worktree.path,
+                self.repo.salvage_max_untracked,
+                facts.last_activity,
+            ));
+        }
         facts
     }
 
@@ -586,8 +613,8 @@ impl Pass<'_> {
         })
     }
 
-    /// Rule 4: an operation under way, or any change `git status` reports (untracked files
-    /// count, ignored ones do not).
+    /// Rule 4: an operation under way, conflicted paths, or any change `git status` reports
+    /// (untracked files count, ignored ones do not).
     fn dirt_of(&self, worktree: &Path) -> Option<Dirt> {
         let git_dir = git::path_of(
             &self.paths.git,
@@ -603,6 +630,11 @@ impl Pass<'_> {
             .find(|(file, _)| git_dir.join(file).exists())
         {
             return Some(Dirt::Operation(operation));
+        }
+        match git::run(&self.paths.git, worktree, &["ls-files", "--unmerged"]) {
+            Ok(unmerged) if unmerged.is_empty() => {}
+            Ok(_) => return Some(Dirt::Unmerged),
+            Err(_) => return Some(Dirt::Changes),
         }
         match git::run(
             &self.paths.git,
@@ -702,6 +734,11 @@ pub fn render(report: &Report) -> String {
                 row.path,
                 row.reason
             );
+        }
+        for salvaged in &repo.salvaged {
+            for line in salvage::describe(salvaged) {
+                let _ = writeln!(out, "{line}");
+            }
         }
     }
     out

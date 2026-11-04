@@ -1,5 +1,6 @@
-//! The decision of rules 3 to 6 and 13, without any I/O: given what was found out about a
-//! worktree, which reap state it is in and the one line that says why.
+//! The decision of rules 3 to 6 and 13, and of ADR dirty-merged-worktrees-are-salvaged, without
+//! any I/O: given what was found out about a worktree, which reap state it is in and the one line
+//! that says why.
 
 use std::time::Duration;
 
@@ -12,9 +13,9 @@ use serde::Serialize;
 pub enum State {
     /// Not merged: work in progress.
     Open,
-    /// Merged, clean, not in use and not locked (rule 6).
+    /// Merged, clean or with changes that can be saved, not in use and not locked (rule 6).
     Removable,
-    /// Merged, but with changes or an operation under way (rule 4).
+    /// Merged, but with changes that cannot be saved yet, or an operation under way (rule 4).
     Dirty,
     /// Merged, but a process runs inside it (rule 5).
     InUse,
@@ -78,6 +79,18 @@ pub enum Dirt {
     Changes,
     /// A merge, rebase, cherry-pick, revert or bisect, by name.
     Operation(&'static str),
+    /// Conflicted paths in the index with no operation under way (a `stash pop`, say).
+    Unmerged,
+}
+
+/// Whether a merged worktree's changes can be saved to a ref before it is removed (ADR
+/// dirty-merged-worktrees-are-salvaged).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Salvage {
+    /// Nothing holds it; its files, commits or checkouts last changed at `last_change`.
+    Ready { last_change: DateTime<Utc> },
+    /// A guard holds it; the text says which, to follow "and".
+    Held(String),
 }
 
 /// What a pass found out about one linked worktree.
@@ -88,6 +101,8 @@ pub struct Facts {
     pub merge: Option<Merge>,
     /// Checked only for a merged or pushed worktree; `None` when clean.
     pub dirt: Option<Dirt>,
+    /// Checked only for a merged worktree with [`Dirt::Changes`].
+    pub salvage: Option<Salvage>,
     pub in_use: InUse,
     /// The number of its pull request when that closed without merging.
     pub closed_pull_request: Option<u64>,
@@ -131,40 +146,64 @@ fn missing(facts: &Facts) -> (State, String) {
     (State::Missing, "folder is gone".into())
 }
 
-/// The state of a worktree and the line that says why. `base` names the base ref as shown.
+/// The settings of one repo that the decision depends on.
+#[derive(Debug, Clone, Copy)]
+pub struct Rules<'a> {
+    /// The base ref as shown, such as `origin/main`.
+    pub base: &'a str,
+    pub stale_after: Duration,
+    pub dirty_grace: Duration,
+}
+
+/// The state of a worktree and the line that says why.
 #[must_use]
-pub fn classify(
-    facts: &Facts,
-    base: &str,
-    stale_after: Duration,
-    now: DateTime<Utc>,
-) -> (State, String) {
+pub fn classify(facts: &Facts, rules: &Rules, now: DateTime<Utc>) -> (State, String) {
     if facts.is_missing {
         return missing(facts);
     }
     let Some(merge) = &facts.merge else {
-        let (state, reason) = unmerged(facts, base, stale_after, now);
+        let (state, reason) = unmerged(facts, rules.base, rules.stale_after, now);
         return match &facts.pushed_to {
             Some(remote) if state == State::Stale => pushed_stale(facts, reason, remote),
             _ => (state, reason),
         };
     };
-    guarded(facts, merge.describe())
+    guarded(facts, merge.describe(), rules.dirty_grace, now)
+}
+
+/// When a merged worktree's changes are saved and it becomes removable: `None` unless they can
+/// be saved and are still too recent.
+#[must_use]
+pub fn saves_at(facts: &Facts, dirty_grace: Duration, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
+    let Some(Salvage::Ready { last_change }) = facts.salvage else {
+        return None;
+    };
+    let at = last_change + chrono::Duration::from_std(dirty_grace).unwrap_or(chrono::Duration::MAX);
+    (facts.merge.is_some() && facts.dirt == Some(Dirt::Changes) && now < at).then_some(at)
 }
 
 /// ADR 0003: a stale worktree whose commits are all on the remote is removed like a merged one,
 /// with its branch kept. Any guard that holds it leaves it stale, so it still needs the
-/// operator.
+/// operator; so do uncommitted changes, which are saved only for a merged worktree.
 fn pushed_stale(facts: &Facts, stale: String, remote: &str) -> (State, String) {
     let ground = format!("{stale}; every commit is on {remote}, so its branch is kept");
-    match guarded(facts, ground) {
+    let facts = Facts {
+        salvage: None,
+        ..facts.clone()
+    };
+    match guarded(&facts, ground, Duration::ZERO, DateTime::<Utc>::MIN_UTC) {
         found @ (State::Removable | State::Refused | State::Kept, _) => found,
         _ => (State::Stale, stale),
     }
 }
 
 /// Rules 4 to 6 and 10 to 11 over a worktree with grounds for removal, `ground` saying which.
-fn guarded(facts: &Facts, ground: String) -> (State, String) {
+fn guarded(
+    facts: &Facts,
+    ground: String,
+    dirty_grace: Duration,
+    now: DateTime<Utc>,
+) -> (State, String) {
     if facts.is_kept {
         return (
             State::Kept,
@@ -195,21 +234,73 @@ fn guarded(facts: &Facts, ground: String) -> (State, String) {
         InUse::No => {}
     }
     match facts.dirt {
-        Some(Dirt::Changes) => (
-            State::Dirty,
-            format!("{ground}, but has uncommitted changes"),
-        ),
+        Some(Dirt::Changes) => salvaged(facts, &ground, dirty_grace, now),
         Some(Dirt::Operation(operation)) => (
             State::Dirty,
             format!("{ground}, but a {operation} is in progress"),
         ),
-        None => match &facts.refusal {
-            Some(message) => (
-                State::Refused,
-                format!("{ground}, but git refused to remove it: {message}"),
-            ),
-            None => (State::Removable, ground),
-        },
+        Some(Dirt::Unmerged) => (State::Dirty, format!("{ground}, but has unmerged paths")),
+        None => unless_refused(facts, ground),
+    }
+}
+
+/// ADR dirty-merged-worktrees-are-salvaged: changes no guard holds are saved to a ref and the
+/// worktree removed, once nothing in it has changed for `dirty_grace`.
+fn salvaged(
+    facts: &Facts,
+    ground: &str,
+    dirty_grace: Duration,
+    now: DateTime<Utc>,
+) -> (State, String) {
+    match &facts.salvage {
+        None => (
+            State::Dirty,
+            format!("{ground}, but has uncommitted changes"),
+        ),
+        Some(Salvage::Held(why)) => (
+            State::Dirty,
+            format!("{ground}, but has uncommitted changes, and {why}"),
+        ),
+        Some(Salvage::Ready { last_change }) if saves_at(facts, dirty_grace, now).is_some() => {
+            let ago = match now.signed_duration_since(*last_change).num_days() {
+                0 => "today".to_string(),
+                1 => "1 day ago".to_string(),
+                n => format!("{n} days ago"),
+            };
+            (
+                State::Dirty,
+                format!(
+                    "{ground}, but has uncommitted changes, last changed {ago}; they are saved \
+                     to a ref once unchanged for {}",
+                    shown_period(dirty_grace)
+                ),
+            )
+        }
+        Some(Salvage::Ready { .. }) => unless_refused(
+            facts,
+            format!("{ground}; its uncommitted changes are saved to a ref first"),
+        ),
+    }
+}
+
+/// "7 days", "1 day", "12h": whole days when the period is some, else hours.
+fn shown_period(period: Duration) -> String {
+    const DAY: u64 = 24 * 3600;
+    match period.as_secs() {
+        DAY => "1 day".into(),
+        seconds if seconds % DAY == 0 => format!("{} days", seconds / DAY),
+        seconds => format!("{}h", seconds / 3600),
+    }
+}
+
+/// Removable, unless git refused to remove it at this HEAD (rule 11).
+fn unless_refused(facts: &Facts, ground: String) -> (State, String) {
+    match &facts.refusal {
+        Some(message) => (
+            State::Refused,
+            format!("{ground}, but git refused to remove it: {message}"),
+        ),
+        None => (State::Removable, ground),
     }
 }
 
@@ -261,8 +352,25 @@ mod tests {
         }
     }
 
+    const WEEK: Duration = Duration::from_secs(7 * 24 * 3600);
+
     fn state_of(facts: &Facts) -> (State, String) {
-        classify(facts, BASE, TWO_WEEKS, now())
+        let rules = Rules {
+            base: BASE,
+            stale_after: TWO_WEEKS,
+            dirty_grace: WEEK,
+        };
+        classify(facts, &rules, now())
+    }
+
+    fn changed(days_ago: i64) -> Facts {
+        Facts {
+            dirt: Some(Dirt::Changes),
+            salvage: Some(Salvage::Ready {
+                last_change: now() - chrono::Duration::days(days_ago),
+            }),
+            ..merged()
+        }
     }
 
     #[test]
@@ -304,6 +412,86 @@ mod tests {
             state_of(&rebasing).1,
             "merged into origin/main, but a rebase is in progress"
         );
+    }
+
+    #[test]
+    fn changes_are_saved_only_once_unchanged_for_the_dirty_grace() {
+        let fresh = changed(0);
+        let recent = changed(3);
+        let old = changed(8);
+
+        assert_eq!(
+            state_of(&fresh),
+            (
+                State::Dirty,
+                "merged into origin/main, but has uncommitted changes, last changed today; they \
+                 are saved to a ref once unchanged for 7 days"
+                    .into()
+            )
+        );
+        assert_eq!(state_of(&recent).0, State::Dirty);
+        assert!(state_of(&recent).1.contains("last changed 3 days ago"));
+        assert_eq!(
+            saves_at(&recent, WEEK, now()),
+            Some(now() + chrono::Duration::days(4))
+        );
+        assert_eq!(
+            state_of(&old),
+            (
+                State::Removable,
+                "merged into origin/main; its uncommitted changes are saved to a ref first".into()
+            )
+        );
+        assert_eq!(saves_at(&old, WEEK, now()), None);
+    }
+
+    #[test]
+    fn a_salvage_guard_or_a_conflict_holds_changes_whatever_their_age() {
+        let nested = Facts {
+            salvage: Some(Salvage::Held(
+                "an untracked repository at vendor/lib/ would be lost".into(),
+            )),
+            ..changed(30)
+        };
+        let unmerged = Facts {
+            dirt: Some(Dirt::Unmerged),
+            ..changed(30)
+        };
+        let locked = Facts {
+            lock_reason: Some(String::new()),
+            ..changed(30)
+        };
+        let refused = Facts {
+            refusal: Some("the save did not match the worktree".into()),
+            ..changed(30)
+        };
+
+        assert_eq!(
+            state_of(&nested).1,
+            "merged into origin/main, but has uncommitted changes, and an untracked repository \
+             at vendor/lib/ would be lost"
+        );
+        assert_eq!(
+            state_of(&unmerged),
+            (
+                State::Dirty,
+                "merged into origin/main, but has unmerged paths".into()
+            )
+        );
+        assert_eq!(state_of(&locked).0, State::Locked);
+        assert_eq!(state_of(&refused).0, State::Refused);
+    }
+
+    #[test]
+    fn a_pushed_stale_worktree_with_changes_is_never_saved() {
+        let facts = Facts {
+            merge: None,
+            last_activity: Some(now() - chrono::Duration::days(21)),
+            pushed_to: Some("origin".into()),
+            ..changed(21)
+        };
+
+        assert_eq!(state_of(&facts).0, State::Stale);
     }
 
     #[test]

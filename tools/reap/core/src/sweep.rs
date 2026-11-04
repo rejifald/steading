@@ -3,8 +3,9 @@
 //!
 //! Removal is `git worktree remove` without `--force`, then `git branch -d`; `git branch -D`
 //! only when `gh` reports a merged pull request that contains the branch tip (rule 11, ADR
-//! 0002). Nothing is pushed, no remote branch is deleted, and a main clone's checkout is never
-//! changed.
+//! 0002). A merged worktree with changes is removed with `--force` only once they are saved to a
+//! ref and checked (ADR dirty-merged-worktrees-are-salvaged). Nothing is pushed, no remote branch
+//! is deleted, and a main clone's checkout is never changed.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::classify::{Merge, State};
+use crate::classify::{Dirt, Merge, Salvage, State};
 use crate::config::{Config, Policy, Repo};
 use crate::ctx::Ctx;
 use crate::fetch;
@@ -23,6 +24,7 @@ use crate::in_use::WorkingDirectories;
 use crate::lock;
 use crate::paths::{Paths, absolute, same_path};
 use crate::report::{self, Inspected, RepoReport};
+use crate::salvage::{self, Source};
 use crate::state_file::{self, Clock, Refusal, RepoMemory};
 use crate::worktree_list;
 
@@ -35,6 +37,9 @@ pub struct Removed {
     /// Why git kept the branch (`git branch -d` refused): *merged, branch kept*.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branch_kept: Option<String>,
+    /// The salvage ref its uncommitted changes were saved to before it was removed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub salvaged_to: Option<String>,
 }
 
 /// A worktree whose grace clock this pass started: the notification of rule 10.
@@ -67,6 +72,8 @@ pub struct Outcome {
     pub removed: Vec<Removed>,
     pub refused: Vec<Refused>,
     pub pruned: bool,
+    /// The salvage refs deleted for their age.
+    pub pruned_salvage: Vec<String>,
     /// Every command run, or, in a dry run, every command that would have run.
     pub log: Vec<String>,
     /// The repo as it is after the pass.
@@ -197,6 +204,7 @@ pub fn sweep_repo(ctx: &Ctx, repo: &Repo, wait: Duration, now: DateTime<Utc>) ->
         removed: Vec::new(),
         refused: Vec::new(),
         pruned: false,
+        pruned_salvage: Vec::new(),
         log: Vec::new(),
         report: report::unreadable(&ctx.paths, repo, &anyhow::anyhow!("not read yet")),
     };
@@ -282,7 +290,7 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
         {
             continue;
         }
-        match remove(ctx, repo, worktree)? {
+        match remove(ctx, repo, worktree, now)? {
             Ok(removed) => outcome.removed.push(removed),
             Err(message) => {
                 refusals.insert(path.clone(), message);
@@ -293,6 +301,7 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
         ctx.write(&repo.path, &["worktree", "prune"])?;
         outcome.pruned = !ctx.dry_run;
     }
+    outcome.pruned_salvage = salvage::prune(ctx, repo, now)?;
     outcome.refused = refusals
         .iter()
         .map(|(path, message)| Refused {
@@ -314,6 +323,7 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
     let has_changed = !outcome.removed.is_empty()
         || !refusals.is_empty()
         || outcome.pruned
+        || !outcome.pruned_salvage.is_empty()
         || !outcome.started.is_empty();
     outcome.report = if has_changed && !ctx.dry_run {
         // Re-read after acting, so the report shows the clocks and removals of this pass.
@@ -391,15 +401,44 @@ fn remember(
     })
 }
 
-/// Removes one worktree and then its branch (rule 11). `Ok(Err(message))` is git's refusal.
-fn remove(ctx: &Ctx, repo: &Repo, worktree: &Inspected) -> Result<Result<Removed, String>> {
+/// Removes one worktree and then its branch (rule 11), saving its changes to a ref first when
+/// it has any (ADR dirty-merged-worktrees-are-salvaged). `Ok(Err(message))` is git's refusal,
+/// or why the save failed.
+fn remove(
+    ctx: &Ctx,
+    repo: &Repo,
+    worktree: &Inspected,
+    now: DateTime<Utc>,
+) -> Result<Result<Removed, String>> {
     let path = ctx.paths.expand(&worktree.key);
     let path_text = path.to_string_lossy();
-    let Some(output) = ctx.write_output(&repo.path, &["worktree", "remove", &path_text])? else {
+    let has_changes = worktree.facts.dirt == Some(Dirt::Changes);
+    let salvaged_to = match (&worktree.facts.salvage, &worktree.head) {
+        (Some(Salvage::Ready { .. }), Some(head)) if has_changes => {
+            let source = Source {
+                key: &worktree.key,
+                branch: worktree.branch.as_deref(),
+                head,
+            };
+            match salvage::save(ctx, repo, &source, now)? {
+                Ok(refname) => Some(refname),
+                Err(why) => return Ok(Err(format!("saving its changes failed: {why}"))),
+            }
+        }
+        // Only a save makes `--force` safe; a dirty worktree without one is git's to refuse.
+        _ => None,
+    };
+    let args: &[&str] = if salvaged_to.is_some() {
+        &["worktree", "remove", "--force", &path_text]
+    } else {
+        &["worktree", "remove", &path_text]
+    };
+    let Some(output) = ctx.write_output(&repo.path, args)? else {
         return Ok(Ok(Removed {
             path: worktree.key.clone(),
             branch: worktree.branch.clone(),
             branch_kept: None,
+            salvaged_to,
         }));
     };
     if !output.status.success() {
@@ -415,6 +454,7 @@ fn remove(ctx: &Ctx, repo: &Repo, worktree: &Inspected) -> Result<Result<Removed
         path: worktree.key.clone(),
         branch: worktree.branch.clone(),
         branch_kept,
+        salvaged_to,
     }))
 }
 
@@ -525,7 +565,7 @@ pub fn remove_now(ctx: &Ctx, selector: &str, now: DateTime<Utc>) -> Result<Remov
     if worktree.state != State::Removable {
         bail!("{key} is not removable: {}", row.reason);
     }
-    let removed = remove(ctx, &repo, worktree)?;
+    let removed = remove(ctx, &repo, worktree, now)?;
     if !ctx.dry_run {
         state_file::update(paths, &paths.tilde(&repo.path), |memory| {
             memory.clocks.remove(&key);
