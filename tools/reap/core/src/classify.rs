@@ -1,6 +1,6 @@
-//! The decision of rules 3 to 6 and 13, and of ADR dirty-merged-worktrees-are-salvaged, without
-//! any I/O: given what was found out about a worktree, which reap state it is in and the one line
-//! that says why.
+//! The decision of rules 3 to 6 and 13, of ADR dirty-merged-worktrees-are-salvaged and of ADR
+//! abandoned-worktrees-are-saved-then-offered, without any I/O: given what was found out about a
+//! worktree, which reap state it is in and the one line that says why.
 
 use std::time::Duration;
 
@@ -21,8 +21,12 @@ pub enum State {
     InUse,
     /// Merged, but `git worktree lock`ed (rule 5).
     Locked,
-    /// Not merged and abandoned (rule 13); flagged, never removed.
+    /// Not merged and abandoned (rule 13), and held by a guard, or with nothing local to save;
+    /// flagged, never removed.
     Stale,
+    /// Stale with something local in it, and nothing holds it (ADR 0006): offered for *Save and
+    /// remove*, never removed by a sweep.
+    Abandoned,
     /// Its folder is gone; git can prune the entry (rule 12).
     Missing,
     /// Merged, but held by *Keep* until its HEAD moves (rule 10).
@@ -41,6 +45,7 @@ impl State {
             Self::InUse => "in use",
             Self::Locked => "locked",
             Self::Stale => "stale",
+            Self::Abandoned => "abandoned",
             Self::Missing => "missing",
             Self::Kept => "kept",
             Self::Refused => "refused",
@@ -58,6 +63,9 @@ pub enum Merge {
     /// (c) `gh` reports the pull request merged at HEAD or at a head that contains it
     /// (ADR 0002).
     PullRequest(u64),
+    /// (d) a merged pull request associated with HEAD, whatever its branch, contains it (ADR
+    /// 0006).
+    Commit(u64),
 }
 
 impl Merge {
@@ -69,6 +77,7 @@ impl Merge {
                 pull_request,
             } => format!("merged into {target}, the target of pull request #{pull_request}"),
             Self::PullRequest(number) => format!("pull request #{number} merged"),
+            Self::Commit(number) => format!("in #{number}, merged"),
         }
     }
 }
@@ -101,7 +110,7 @@ pub struct Facts {
     pub merge: Option<Merge>,
     /// Checked only for a merged or pushed worktree; `None` when clean.
     pub dirt: Option<Dirt>,
-    /// Checked only for a merged worktree with [`Dirt::Changes`].
+    /// Checked only for a merged or stale worktree with [`Dirt::Changes`].
     pub salvage: Option<Salvage>,
     pub in_use: InUse,
     /// The number of its pull request when that closed without merging.
@@ -117,6 +126,10 @@ pub struct Facts {
     /// The remote, as shown, when the worktree is on a branch and every commit on it is in that
     /// remote's tracking refs (ADR 0003).
     pub pushed_to: Option<String>,
+    /// For a stale worktree only: what in it exists only here, each as shown (`13 uncommitted
+    /// changes`, `22 commits on no remote`, `a detached HEAD`, `pull request #15 open`), ADR
+    /// 0006 rule 9.
+    pub local: Vec<String>,
 }
 
 /// Whether a process runs inside a worktree.
@@ -163,12 +176,83 @@ pub fn classify(facts: &Facts, rules: &Rules, now: DateTime<Utc>) -> (State, Str
     }
     let Some(merge) = &facts.merge else {
         let (state, reason) = unmerged(facts, rules.base, rules.stale_after, now);
-        return match &facts.pushed_to {
-            Some(remote) if state == State::Stale => pushed_stale(facts, reason, remote),
-            _ => (state, reason),
-        };
+        if state != State::Stale {
+            return (state, reason);
+        }
+        if let (Some(remote), None) = (&facts.pushed_to, &facts.dirt)
+            && let Some(found) = pushed_stale(facts, &reason, remote)
+        {
+            return found;
+        }
+        return abandoned(facts, &reason);
     };
     guarded(facts, merge.describe(), rules.dirty_grace, now)
+}
+
+/// Why an unmerged worktree is stale (rule 13), or `None` when it is not.
+#[must_use]
+pub fn stale_reason(facts: &Facts, stale_after: Duration, now: DateTime<Utc>) -> Option<String> {
+    if facts.merge.is_some() {
+        return None;
+    }
+    let (state, reason) = unmerged(facts, "", stale_after, now);
+    (state == State::Stale).then_some(reason)
+}
+
+/// The guard of ADR 0004 rule 1 that holds a stale worktree, other than a *Keep*, as it follows
+/// "reap won't remove it:" (ADR 0006 rule 5); `None` when none does.
+#[must_use]
+pub fn guard_of(facts: &Facts) -> Option<String> {
+    if let Some(lock_reason) = &facts.lock_reason {
+        return Some(if lock_reason.is_empty() {
+            "locked".to_string()
+        } else {
+            format!("locked: {lock_reason}")
+        });
+    }
+    match &facts.in_use {
+        InUse::Yes => return Some("a process is running inside it".into()),
+        InUse::Unknown(why) => {
+            return Some(format!("processes inside it could not be checked: {why}"));
+        }
+        InUse::No => {}
+    }
+    match (&facts.dirt, &facts.salvage) {
+        (Some(Dirt::Operation(operation)), _) => Some(format!("a {operation} is in progress")),
+        (Some(Dirt::Unmerged), _) => Some("it has unmerged paths".into()),
+        (Some(Dirt::Changes), Some(Salvage::Held(why))) => Some(why.clone()),
+        (Some(Dirt::Changes), None) => Some("its changes were not checked".into()),
+        _ => None,
+    }
+}
+
+/// ADR 0006 rules 4, 5 and 9: a stale worktree with something local is *abandoned*, offered for
+/// *Save and remove*, unless a guard holds it; either way its line names what is local and the
+/// guard. A kept one is *kept*, and a save that failed at this HEAD is *refused*.
+fn abandoned(facts: &Facts, stale: &str) -> (State, String) {
+    let ground = std::iter::once(stale)
+        .chain(facts.local.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if facts.is_kept {
+        return (
+            State::Kept,
+            format!("{ground}, but kept until it gets new commits"),
+        );
+    }
+    if let Some(guard) = guard_of(facts) {
+        return (State::Stale, format!("{ground} · {guard}"));
+    }
+    if facts.local.is_empty() {
+        return (State::Stale, ground);
+    }
+    match &facts.refusal {
+        Some(message) => (
+            State::Refused,
+            format!("{ground}, but saving and removing it failed: {message}"),
+        ),
+        None => (State::Abandoned, ground),
+    }
 }
 
 /// When a merged worktree's changes are saved and it becomes removable: `None` unless they can
@@ -182,18 +266,18 @@ pub fn saves_at(facts: &Facts, dirty_grace: Duration, now: DateTime<Utc>) -> Opt
     (facts.merge.is_some() && facts.dirt == Some(Dirt::Changes) && now < at).then_some(at)
 }
 
-/// ADR 0003: a stale worktree whose commits are all on the remote is removed like a merged one,
-/// with its branch kept. Any guard that holds it leaves it stale, so it still needs the
-/// operator; so do uncommitted changes, which are saved only for a merged worktree.
-fn pushed_stale(facts: &Facts, stale: String, remote: &str) -> (State, String) {
+/// ADR 0003: a clean stale worktree whose commits are all on the remote is removed like a merged
+/// one, with its branch kept. `None` when a lock or a process holds it: it is then judged as
+/// abandoned, which names the guard.
+fn pushed_stale(facts: &Facts, stale: &str, remote: &str) -> Option<(State, String)> {
     let ground = format!("{stale}; every commit is on {remote}, so its branch is kept");
     let facts = Facts {
         salvage: None,
         ..facts.clone()
     };
     match guarded(&facts, ground, Duration::ZERO, DateTime::<Utc>::MIN_UTC) {
-        found @ (State::Removable | State::Refused | State::Kept, _) => found,
-        _ => (State::Stale, stale),
+        found @ (State::Removable | State::Refused | State::Kept, _) => Some(found),
+        _ => None,
     }
 }
 
@@ -483,15 +567,22 @@ mod tests {
     }
 
     #[test]
-    fn a_pushed_stale_worktree_with_changes_is_never_saved() {
+    fn a_pushed_stale_worktree_with_changes_is_abandoned_not_removed() {
         let facts = Facts {
             merge: None,
             last_activity: Some(now() - chrono::Duration::days(21)),
             pushed_to: Some("origin".into()),
+            local: vec!["1 uncommitted change".into()],
             ..changed(21)
         };
 
-        assert_eq!(state_of(&facts).0, State::Stale);
+        assert_eq!(
+            state_of(&facts),
+            (
+                State::Abandoned,
+                "no commit or checkout for 21 days · 1 uncommitted change".into()
+            )
+        );
     }
 
     #[test]
@@ -604,6 +695,10 @@ mod tests {
         };
         let dirty = Facts {
             dirt: Some(Dirt::Changes),
+            salvage: Some(Salvage::Ready {
+                last_change: now() - chrono::Duration::days(21),
+            }),
+            local: vec!["2 uncommitted changes".into()],
             ..pushed.clone()
         };
         let busy = Facts {
@@ -623,12 +718,15 @@ mod tests {
                     .into()
             )
         );
-        // A guard that holds it leaves it stale: it still needs the operator.
+        // Changes make it abandoned, offered and never removed; a guard leaves it stale.
+        assert_eq!(state_of(&dirty).0, State::Abandoned);
         assert_eq!(
-            state_of(&dirty),
-            (State::Stale, "no commit or checkout for 21 days".into())
+            state_of(&busy),
+            (
+                State::Stale,
+                "no commit or checkout for 21 days · a process is running inside it".into()
+            )
         );
-        assert_eq!(state_of(&busy).0, State::Stale);
         assert_eq!(state_of(&recent).0, State::Open);
     }
 
@@ -641,5 +739,132 @@ mod tests {
         };
 
         assert_eq!(state_of(&facts).0, State::Removable);
+    }
+
+    fn stale_with(local: &[&str]) -> Facts {
+        Facts {
+            last_activity: Some(now() - chrono::Duration::days(119)),
+            local: local.iter().map(|part| (*part).to_string()).collect(),
+            ..Facts::default()
+        }
+    }
+
+    #[test]
+    fn an_abandoned_row_names_everything_local_in_it() {
+        let facts = Facts {
+            dirt: Some(Dirt::Changes),
+            salvage: Some(Salvage::Ready {
+                last_change: now() - chrono::Duration::days(119),
+            }),
+            ..stale_with(&["13 uncommitted changes", "22 commits on no remote"])
+        };
+        let detached = stale_with(&["a detached HEAD"]);
+
+        assert_eq!(
+            state_of(&facts),
+            (
+                State::Abandoned,
+                "no commit or checkout for 119 days · 13 uncommitted changes · 22 commits on no \
+                 remote"
+                    .into()
+            )
+        );
+        assert_eq!(
+            state_of(&detached),
+            (
+                State::Abandoned,
+                "no commit or checkout for 119 days · a detached HEAD".into()
+            )
+        );
+    }
+
+    #[test]
+    fn a_held_stale_row_names_what_is_local_and_the_guard() {
+        let merging = Facts {
+            dirt: Some(Dirt::Operation("merge")),
+            ..stale_with(&["pull request #15 open"])
+        };
+        let locked = Facts {
+            lock_reason: Some("agent".into()),
+            ..stale_with(&["3 commits on no remote"])
+        };
+        let nested = Facts {
+            dirt: Some(Dirt::Changes),
+            salvage: Some(Salvage::Held(
+                "an untracked repository at vendor/lib/ would be lost".into(),
+            )),
+            ..stale_with(&["1 uncommitted change"])
+        };
+        let unmerged = Facts {
+            dirt: Some(Dirt::Unmerged),
+            ..stale_with(&["2 uncommitted changes"])
+        };
+
+        assert_eq!(
+            state_of(&merging),
+            (
+                State::Stale,
+                "no commit or checkout for 119 days · pull request #15 open · a merge is in \
+                 progress"
+                    .into()
+            )
+        );
+        assert_eq!(
+            guard_of(&merging).as_deref(),
+            Some("a merge is in progress")
+        );
+        assert_eq!(
+            state_of(&locked).1,
+            "no commit or checkout for 119 days · 3 commits on no remote · locked: agent"
+        );
+        assert_eq!(state_of(&nested).0, State::Stale);
+        assert!(
+            state_of(&nested)
+                .1
+                .ends_with("· an untracked repository at vendor/lib/ would be lost")
+        );
+        assert_eq!(
+            state_of(&unmerged).1,
+            "no commit or checkout for 119 days · 2 uncommitted changes · it has unmerged paths"
+        );
+    }
+
+    #[test]
+    fn a_kept_or_refused_abandoned_worktree_says_so() {
+        let kept = Facts {
+            is_kept: true,
+            ..stale_with(&["a detached HEAD"])
+        };
+        let refused = Facts {
+            refusal: Some("the save did not match the worktree".into()),
+            ..stale_with(&["a detached HEAD"])
+        };
+
+        assert_eq!(state_of(&kept).0, State::Kept);
+        assert_eq!(
+            state_of(&refused),
+            (
+                State::Refused,
+                "no commit or checkout for 119 days · a detached HEAD, but saving and removing it \
+                 failed: the save did not match the worktree"
+                    .into()
+            )
+        );
+    }
+
+    #[test]
+    fn a_worktree_merged_by_commit_says_which_pull_request() {
+        let found = Facts {
+            merge: Some(Merge::Commit(212)),
+            last_activity: Some(now() - chrono::Duration::days(90)),
+            local: vec!["a detached HEAD".into()],
+            ..Facts::default()
+        };
+
+        assert_eq!(
+            state_of(&found),
+            (State::Removable, "in #212, merged".into())
+        );
+        assert_eq!(stale_reason(&found, TWO_WEEKS, now()), None);
     }
 }

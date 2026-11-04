@@ -2,10 +2,12 @@
 //! every worktree, run the grace clocks, and remove what is due with git's own guards.
 //!
 //! Removal is `git worktree remove` without `--force`, then `git branch -d`; `git branch -D`
-//! only when `gh` reports a merged pull request that contains the branch tip (rule 11, ADR
-//! 0002). A merged worktree with changes is removed with `--force` only once they are saved to a
-//! ref and checked (ADR dirty-merged-worktrees-are-salvaged). Nothing is pushed, no remote branch
-//! is deleted, and a main clone's checkout is never changed.
+//! only when `gh` reports a merged pull request that contains the branch tip (rule 11, ADRs
+//! 0002 and 0006). A merged worktree with changes is removed with `--force` only once they are
+//! saved to a ref and checked (ADR dirty-merged-worktrees-are-salvaged). An abandoned worktree is
+//! never removed by a pass: only [`salvage_now`], on the operator's confirmation, saves it to a
+//! ref, checks it and removes it with `--force`, keeping its branch (ADR 0006). Nothing is pushed,
+//! no remote branch is deleted, and a main clone's checkout is never changed.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -15,7 +17,7 @@ use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::classify::{Dirt, Merge, Salvage, State};
+use crate::classify::{self, Dirt, Merge, Salvage, State};
 use crate::config::{Config, Policy, Repo};
 use crate::ctx::Ctx;
 use crate::fetch;
@@ -24,7 +26,7 @@ use crate::in_use::WorkingDirectories;
 use crate::lock;
 use crate::paths::{Paths, absolute, same_path};
 use crate::report::{self, Inspected, RepoReport};
-use crate::salvage::{self, Source};
+use crate::salvage::{self, Purpose, Source};
 use crate::state_file::{self, Clock, Refusal, RepoMemory};
 use crate::worktree_list;
 
@@ -421,7 +423,7 @@ fn remove(
                 branch: worktree.branch.as_deref(),
                 head,
             };
-            match salvage::save(ctx, repo, &source, now)? {
+            match salvage::save(ctx, repo, &source, &Purpose::Merged, now)? {
                 Ok(refname) => Some(refname),
                 Err(why) => return Ok(Err(format!("saving its changes failed: {why}"))),
             }
@@ -460,7 +462,7 @@ fn remove(
 }
 
 /// `git branch -D` when the branch tip is HEAD and the merged pull request contains it (rule
-/// 3(c), ADR 0002), else `-d`;
+/// 3(c) or (d), ADRs 0002 and 0006), else `-d`;
 /// `Some(why)` when git kept the branch.
 fn delete_branch(
     ctx: &Ctx,
@@ -469,8 +471,10 @@ fn delete_branch(
     branch: &str,
 ) -> Result<Option<String>> {
     let tip = git::resolve(&ctx.paths.git, &repo.path, &format!("refs/heads/{branch}"));
-    let is_merged_at_tip = matches!(worktree.facts.merge, Some(Merge::PullRequest(_)))
-        && tip.is_some()
+    let is_merged_at_tip = matches!(
+        worktree.facts.merge,
+        Some(Merge::PullRequest(_) | Merge::Commit(_))
+    ) && tip.is_some()
         && tip == worktree.head;
     let flag = if is_merged_at_tip { "-D" } else { "-d" };
     let output = ctx.write_output(&repo.path, &["branch", flag, branch])?;
@@ -587,6 +591,105 @@ pub fn remove_now(ctx: &Ctx, selector: &str, now: DateTime<Utc>) -> Result<Remov
         })?;
     }
     removed.map_err(|message| anyhow::anyhow!("git refused to remove {key}: {message}"))
+}
+
+/// *Save and remove* and `git reap salvage <worktree>` (ADR 0006 rules 6 and 7): under the
+/// clone's lock, judges the worktree afresh, and only if it is still abandoned saves its whole
+/// state to a salvage ref (a clean one gets a commit with HEAD's tree), checks it, and runs
+/// `git worktree remove --force`. Its branch is kept. A failed step removes nothing and is
+/// recorded as a refusal at its HEAD.
+///
+/// # Errors
+///
+/// Fails when the worktree is not a linked worktree of a listed repo, its repo is busy, it is
+/// not abandoned, or a step failed.
+pub fn salvage_now(ctx: &Ctx, selector: &str, now: DateTime<Utc>) -> Result<Removed> {
+    let paths = &ctx.paths;
+    let (repo, path) = locate(paths, selector)?;
+    let key = paths.tilde(&path);
+    let common_dir = git::path_of(&paths.git, &repo.path, &["rev-parse", "--git-common-dir"])?;
+    let _lock = lock::acquire(&common_dir, Duration::from_secs(10))?
+        .map_err(|why| anyhow::anyhow!("{} is busy: {why}", paths.tilde(&repo.path)))?;
+    let prepared = report::prepare(paths, &repo)?;
+    let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
+    let mut memory = state_file::load(paths)
+        .remove(&paths.tilde(&repo.path))
+        .unwrap_or_default();
+    // A failed save is retried on request: drop it so the worktree is judged afresh.
+    memory.refusals.remove(&key);
+    let inspection = report::inspect(paths, &repo, &prepared, &directories, &memory, now)?;
+    let (worktree, row) = inspection
+        .worktrees
+        .iter()
+        .zip(&inspection.report.worktrees)
+        .find(|(worktree, _)| worktree.key == key)
+        .context("the worktree disappeared while reap looked at it")?;
+    if worktree.state != State::Abandoned {
+        bail!("{key} is not abandoned: {}", row.reason);
+    }
+    let stale = classify::stale_reason(&worktree.facts, repo.stale_after, now)
+        .context("the worktree is no longer stale")?;
+    let saved = save_and_remove(ctx, &repo, worktree, &stale, now)?;
+    if !ctx.dry_run {
+        state_file::update(paths, &paths.tilde(&repo.path), |memory| {
+            memory.clocks.remove(&key);
+            match &saved {
+                Ok(_) => {
+                    memory.refusals.remove(&key);
+                    memory.keeps.remove(&key);
+                }
+                Err(message) => {
+                    memory.refusals.insert(
+                        key.clone(),
+                        Refusal {
+                            head: worktree.head.clone().unwrap_or_default(),
+                            message: message.clone(),
+                        },
+                    );
+                }
+            }
+        })?;
+    }
+    saved.map_err(|message| anyhow::anyhow!("reap did not remove {key}: {message}"))
+}
+
+/// ADR 0006 rule 7: ADR 0004 rule 3 steps 1 to 4, always, then `git worktree remove --force`,
+/// keeping the branch. `Ok(Err(why))` when the save or the removal failed.
+fn save_and_remove(
+    ctx: &Ctx,
+    repo: &Repo,
+    worktree: &Inspected,
+    stale: &str,
+    now: DateTime<Utc>,
+) -> Result<Result<Removed, String>> {
+    let Some(head) = &worktree.head else {
+        return Ok(Err("it has no HEAD to save".into()));
+    };
+    let source = Source {
+        key: &worktree.key,
+        branch: worktree.branch.as_deref(),
+        head,
+    };
+    let refname = match salvage::save(ctx, repo, &source, &Purpose::Abandoned { stale }, now)? {
+        Ok(refname) => refname,
+        Err(why) => return Ok(Err(format!("saving it failed: {why}"))),
+    };
+    let path = ctx.paths.expand(&worktree.key);
+    let path_text = path.to_string_lossy();
+    // `--force` only now: the save holds everything `remove` would refuse to delete.
+    let output = ctx.write_output(&repo.path, &["worktree", "remove", "--force", &path_text])?;
+    if let Some(output) = output
+        && !output.status.success()
+    {
+        return Ok(Err(git::first_error_line(&output)));
+    }
+    Ok(Ok(Removed {
+        path: worktree.key.clone(),
+        branch: worktree.branch.clone(),
+        // Not merged anywhere: the branch is how the operator finds and resumes the work.
+        branch_kept: worktree.branch.as_ref().map(|_| "not merged".to_string()),
+        salvaged_to: Some(refname),
+    }))
 }
 
 #[cfg(test)]

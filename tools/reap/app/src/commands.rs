@@ -109,6 +109,37 @@ pub async fn remove_now(state: Shared<'_>, path: String) -> Result<(), String> {
     .await?
 }
 
+/// *Save and remove*: saves an abandoned worktree to a ref, then removes it (ADR 0006); the
+/// click is the operator's confirmation.
+#[tauri::command]
+pub async fn save_and_remove(state: Shared<'_>, path: String) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let ctx = reap_core::ctx::Ctx::new(state.paths.clone(), false);
+        let result = reap_core::sweep::salvage_now(&ctx, &path, chrono::Utc::now());
+        state.send(Event::Refresh);
+        result.map(drop).map_err(|e| format!("{e:#}"))
+    })
+    .await?
+}
+
+/// *Delete* on a save: deletes one salvage ref in the repo the popover lists it under.
+#[tauri::command]
+pub async fn delete_salvaged(
+    state: Shared<'_>,
+    repo: String,
+    refname: String,
+) -> Result<(), String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let ctx = reap_core::ctx::Ctx::new(state.paths.clone(), false);
+        let result = reap_core::salvage::delete(&ctx, Some(&repo), &refname);
+        state.send(Event::Refresh);
+        result.map(drop).map_err(|e| format!("{e:#}"))
+    })
+    .await?
+}
+
 #[tauri::command]
 pub fn open_in_finder(state: Shared<'_>, path: String) -> Result<(), String> {
     Command::new("open")

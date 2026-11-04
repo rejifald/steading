@@ -44,6 +44,8 @@ pub fn run() {
             commands::keep,
             commands::unkeep,
             commands::remove_now,
+            commands::save_and_remove,
+            commands::delete_salvaged,
             commands::open_in_finder,
             commands::hide,
             commands::quit,
