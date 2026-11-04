@@ -6,10 +6,11 @@
 //! command instead of running it (rule 14).
 
 use std::cell::RefCell;
+use std::ffi::OsStr;
 use std::path::Path;
 use std::process::Output;
 
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 
 use crate::git;
 use crate::paths::Paths;
@@ -46,13 +47,37 @@ impl Ctx {
     ///
     /// Fails when git cannot be started.
     pub fn write_output(&self, dir: &Path, args: &[&str]) -> Result<Option<Output>> {
-        let shown = format!("git -C {} {}", self.paths.tilde(dir), args.join(" "));
+        self.write_output_with(dir, args, &[])
+    }
+
+    /// Like [`Ctx::write_output`], with `env` set for git (a `GIT_INDEX_FILE`, say).
+    ///
+    /// # Errors
+    ///
+    /// Fails when git cannot be started.
+    pub fn write_output_with(
+        &self,
+        dir: &Path,
+        args: &[&str],
+        env: &[(&str, &OsStr)],
+    ) -> Result<Option<Output>> {
+        let mut words: Vec<String> = env
+            .iter()
+            .map(|(name, value)| format!("{name}={}", self.paths.tilde(Path::new(value))))
+            .collect();
+        words.push(format!("git -C {}", self.paths.tilde(dir)));
+        words.extend(args.iter().map(|arg| (*arg).to_string()));
+        let shown = words.join(" ");
         if self.dry_run {
             self.note(format!("would run: {shown}"));
             return Ok(None);
         }
         self.note(format!("run: {shown}"));
-        git::output(&self.paths.git, dir, args).map(Some)
+        git::command(&self.paths.git, dir, args)
+            .envs(env.iter().copied())
+            .output()
+            .with_context(|| format!("running git {}", args.join(" ")))
+            .map(Some)
     }
 
     /// Like [`Ctx::write_output`] but a non-zero exit is an error.

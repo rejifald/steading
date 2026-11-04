@@ -1,11 +1,15 @@
-//! `repos.toml` (rules 1, 7, 10, 13): one `[[repo]]` per main clone, with the sweep settings
-//! globally and per repo. Nothing in a clone that is not listed is ever touched.
+//! `repos.toml` (rules 1, 7, 10, 13 and ADR dirty-merged-worktrees-are-salvaged): one `[[repo]]`
+//! per main clone, with the sweep settings globally and per repo. Nothing in a clone that is not
+//! listed is ever touched.
 //!
 //! ```toml
 //! interval = "5m"       # optional, every setting below too
 //! policy = "auto"       # or "ask", "off"
 //! grace = "24h"
 //! stale_after = "14d"
+//! dirty_grace = "7d"    # a merged worktree with changes: unchanged this long, then saved
+//! salvage_max_untracked = "100MB"
+//! salvage_max_age = "30d"
 //!
 //! [[repo]]
 //! path = "~/Development/app"
@@ -28,6 +32,9 @@ pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(5 * 60);
 pub const MIN_INTERVAL: Duration = Duration::from_secs(60);
 pub const DEFAULT_GRACE: Duration = Duration::from_secs(24 * 3600);
 pub const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(14 * 24 * 3600);
+pub const DEFAULT_DIRTY_GRACE: Duration = Duration::from_secs(7 * 24 * 3600);
+pub const DEFAULT_SALVAGE_MAX_UNTRACKED: u64 = 100_000_000;
+pub const DEFAULT_SALVAGE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 3600);
 
 /// What reap does with a removable worktree (rule 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -53,8 +60,8 @@ impl Policy {
     }
 }
 
-/// One `[[repo]]` entry as written in the file. `policy`, `grace` and `stale_after` override
-/// the file's global values.
+/// One `[[repo]]` entry as written in the file. Every setting but `path`, `remote` and `base`
+/// overrides the file's global value.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RepoEntry {
@@ -69,6 +76,12 @@ pub struct RepoEntry {
     pub grace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_after: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dirty_grace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salvage_max_untracked: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salvage_max_age: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -82,6 +95,12 @@ pub struct Config {
     pub grace: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_after: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dirty_grace: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salvage_max_untracked: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub salvage_max_age: Option<String>,
     #[serde(default)]
     pub repo: Vec<RepoEntry>,
 }
@@ -96,6 +115,13 @@ pub struct Repo {
     pub policy: Policy,
     pub grace: Duration,
     pub stale_after: Duration,
+    /// How long a merged worktree's changes must stay untouched before they are saved to a ref
+    /// and it becomes removable.
+    pub dirty_grace: Duration,
+    /// The most untracked data, in bytes, a save copies into the clone's objects.
+    pub salvage_max_untracked: u64,
+    /// How long a salvage ref is kept before a sweep deletes it.
+    pub salvage_max_age: Duration,
 }
 
 impl Repo {
@@ -135,6 +161,31 @@ pub fn parse_duration(text: &str) -> Result<Duration> {
         _ => bail!("{text:?}: expected <n>s, <n>m, <n>h or <n>d"),
     };
     Ok(Duration::from_secs(count * seconds_per_unit))
+}
+
+/// `100MB`, `1GB`, `500kB`, or a bare number of bytes; decimal units, as Finder counts.
+///
+/// # Errors
+///
+/// Fails on any other form.
+pub fn parse_size(text: &str) -> Result<u64> {
+    let text = text.trim();
+    let (number, unit) = text
+        .find(|c: char| !c.is_ascii_digit())
+        .map_or((text, ""), |at| text.split_at(at));
+    let count: u64 = number
+        .parse()
+        .with_context(|| format!("{text:?}: expected <n>, <n>kB, <n>MB or <n>GB"))?;
+    let bytes_per_unit: u64 = match unit.trim().to_ascii_lowercase().as_str() {
+        "" | "b" => 1,
+        "k" | "kb" => 1_000,
+        "m" | "mb" => 1_000_000,
+        "g" | "gb" => 1_000_000_000,
+        _ => bail!("{text:?}: expected <n>, <n>kB, <n>MB or <n>GB"),
+    };
+    count
+        .checked_mul(bytes_per_unit)
+        .with_context(|| format!("{text:?} is too large"))
 }
 
 /// The pass interval, at least [`MIN_INTERVAL`].
@@ -248,6 +299,25 @@ impl Config {
                 &self.stale_after,
                 DEFAULT_STALE_AFTER,
             )?,
+            dirty_grace: duration(
+                "dirty_grace",
+                &entry.dirty_grace,
+                &self.dirty_grace,
+                DEFAULT_DIRTY_GRACE,
+            )?,
+            salvage_max_untracked: entry
+                .salvage_max_untracked
+                .as_ref()
+                .or(self.salvage_max_untracked.as_ref())
+                .map_or(Ok(DEFAULT_SALVAGE_MAX_UNTRACKED), |text| {
+                    parse_size(text).context("salvage_max_untracked")
+                })?,
+            salvage_max_age: duration(
+                "salvage_max_age",
+                &entry.salvage_max_age,
+                &self.salvage_max_age,
+                DEFAULT_SALVAGE_MAX_AGE,
+            )?,
         })
     }
 }
@@ -267,6 +337,18 @@ mod tests {
         assert_eq!(parse_duration("120").unwrap(), Duration::from_secs(120));
         assert!(parse_duration("5w").is_err());
         assert!(parse_duration("m").is_err());
+    }
+
+    #[test]
+    fn sizes_parse_with_decimal_units() {
+        assert_eq!(parse_size("100MB").unwrap(), DEFAULT_SALVAGE_MAX_UNTRACKED);
+        assert_eq!(parse_size("1GB").unwrap(), 1_000_000_000);
+        assert_eq!(parse_size("500kB").unwrap(), 500_000);
+        assert_eq!(parse_size("2 mb").unwrap(), 2_000_000);
+        assert_eq!(parse_size("4096").unwrap(), 4096);
+        assert!(parse_size("5TB").is_err());
+        assert!(parse_size("MB").is_err());
+        assert!(parse_size("99999999999999GB").is_err());
     }
 
     #[test]
@@ -298,6 +380,34 @@ mod tests {
         assert_eq!(repos[1].policy, Policy::Off);
         assert_eq!(repos[1].stale_after, Duration::from_secs(3 * 24 * 3600));
         assert_eq!(repos[1].name(), "api");
+        assert_eq!(repos[0].dirty_grace, DEFAULT_DIRTY_GRACE);
+        assert_eq!(
+            repos[0].salvage_max_untracked,
+            DEFAULT_SALVAGE_MAX_UNTRACKED
+        );
+        assert_eq!(repos[0].salvage_max_age, DEFAULT_SALVAGE_MAX_AGE);
+    }
+
+    #[test]
+    fn the_salvage_settings_are_read_globally_and_per_repo() {
+        let paths = Paths::new(Path::new("/Users/me"), Path::new("/c"));
+        let config: Config = toml::from_str(
+            "dirty_grace = \"3d\"\nsalvage_max_untracked = \"10MB\"\n\n\
+             [[repo]]\npath = \"/a\"\n\n\
+             [[repo]]\npath = \"/b\"\ndirty_grace = \"12h\"\nsalvage_max_age = \"60d\"\n",
+        )
+        .unwrap();
+
+        let repos = config.repos(&paths).unwrap();
+
+        assert_eq!(repos[0].dirty_grace, Duration::from_secs(3 * 24 * 3600));
+        assert_eq!(repos[0].salvage_max_untracked, 10_000_000);
+        assert_eq!(repos[1].dirty_grace, Duration::from_secs(12 * 3600));
+        assert_eq!(repos[1].salvage_max_untracked, 10_000_000);
+        assert_eq!(
+            repos[1].salvage_max_age,
+            Duration::from_secs(60 * 24 * 3600)
+        );
     }
 
     #[test]
@@ -306,6 +416,7 @@ mod tests {
         for bad in [
             "[[repo]]\npath = \"relative\"\n",
             "[[repo]]\npath = \"/a\"\ngrace = \"soon\"\n",
+            "[[repo]]\npath = \"/a\"\nsalvage_max_untracked = \"lots\"\n",
             "interval = \"10s\"\n[[repo]]\npath = \"/a\"\n",
             "[[repo]]\npath = \"/a\"\n[[repo]]\npath = \"/a\"\n",
         ] {
