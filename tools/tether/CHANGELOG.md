@@ -7,6 +7,9 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- `install.sh` now runs the repository's `scripts/install-app.sh`, which reap's installer shares;
+  what it does is unchanged. `scripts/reinstall.sh`, set as the steading clone's `after`, rebuilds
+  and reinstalls tether and reap whenever that clone moves.
 - Storybook for the popover (ADR 0005): every panel of the approved design boards is a story,
   dark and light from a toolbar switch, with `play` steps for forms, focus and menus. Dev-only;
   the app bundle is unchanged.
