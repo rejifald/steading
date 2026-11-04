@@ -2,6 +2,9 @@
 //! is ever synced.
 //!
 //! ```toml
+//! scan = ["~/Development", "~/Code"]  # optional (repository ADR 0004 rule 4): where `discover` looks; [] turns it off
+//! skip = ["~/Development/scratch"]    # optional (repository ADR 0004 rule 3): clones `discover` never suggests
+//!
 //! [[repo]]
 //! path = "~/Development/notes"
 //! branch = "main"
@@ -69,6 +72,13 @@ pub struct RepoEntry {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    /// Where clone discovery looks. Absent means the default roots; `[]` means nowhere.
+    /// Declared before `repo`: TOML writes the tables last.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan: Option<Vec<String>>,
+    /// Clones discovery never suggests.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skip: Vec<String>,
     #[serde(default)]
     pub repo: Vec<RepoEntry>,
 }
@@ -197,7 +207,8 @@ impl Config {
         std::fs::create_dir_all(&paths.config)
             .with_context(|| format!("creating {}", paths.config.display()))?;
         let body = format!(
-            "# tether (ADR 0001): one [[repo]] per clone. Edited by `git tether add` / `set` / `remove`.\n\n{}",
+            "# tether (ADR 0001): one [[repo]] per clone. Edited by `git tether add` / `set` / `remove`.\n\
+             # Optional: scan = [\"~/Development\"] (where `discover` looks) and skip = [...] (clones it never suggests).\n\n{}",
             toml::to_string(self).context("serialising repos.toml")?
         );
         let tmp = file.with_extension("toml.tmp");
@@ -210,8 +221,10 @@ impl Config {
     ///
     /// # Errors
     ///
-    /// Fails when any entry is invalid, or two entries list the same path.
+    /// Fails when any entry is invalid, two entries list the same path, or a `scan` or `skip` entry is not an absolute or `~/` path.
     pub fn repos(&self, paths: &Paths) -> Result<Vec<Repo>> {
+        self.scan_roots(paths)?;
+        self.skipped(paths)?;
         let mut out: Vec<Repo> = Vec::new();
         for e in &self.repo {
             let r = resolve(e, paths).with_context(|| format!("repos.toml entry {}", e.path))?;
@@ -222,6 +235,42 @@ impl Config {
         }
         Ok(out)
     }
+}
+
+impl Config {
+    /// The `scan` entries expanded, or `None` while `scan` is absent (the defaults apply).
+    ///
+    /// # Errors
+    ///
+    /// Fails, naming the entry, when one is not an absolute or `~/` path.
+    pub fn scan_roots(&self, paths: &Paths) -> Result<Option<Vec<PathBuf>>> {
+        self.scan
+            .as_ref()
+            .map(|list| expand_list("scan", list, paths))
+            .transpose()
+    }
+
+    /// The `skip` entries expanded.
+    ///
+    /// # Errors
+    ///
+    /// Fails, naming the entry, when one is not an absolute or `~/` path.
+    pub fn skipped(&self, paths: &Paths) -> Result<Vec<PathBuf>> {
+        expand_list("skip", &self.skip, paths)
+    }
+}
+
+fn expand_list(key: &str, list: &[String], paths: &Paths) -> Result<Vec<PathBuf>> {
+    list.iter()
+        .map(|e| {
+            let path = paths.expand(e);
+            if path.is_absolute() {
+                Ok(path)
+            } else {
+                bail!("repos.toml {key} entry {e}: path must be absolute or start with ~/")
+            }
+        })
+        .collect()
 }
 
 fn resolve(e: &RepoEntry, paths: &Paths) -> Result<Repo> {
@@ -328,5 +377,86 @@ mod tests {
             (repos[1].gate.as_deref(), repos[1].after.as_deref()),
             (None, None)
         );
+    }
+
+    #[test]
+    fn a_file_without_scan_or_skip_round_trips_byte_for_byte() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(Path::new("/Users/me"), dir.path());
+        let cfg: Config = toml::from_str(
+            "[[repo]]\npath = \"~/Development/notes\"\nbranch = \"main\"\n\n\
+             [[repo]]\npath = \"/srv/docs\"\nbranch = \"gh-pages\"\nmode = \"mirror\"\n",
+        )
+        .unwrap();
+        cfg.save(&paths).unwrap();
+        let first = std::fs::read_to_string(paths.config_file()).unwrap();
+        assert!(
+            !first.contains("\nscan") && !first.contains("\nskip"),
+            "{first}"
+        );
+        Config::load(&paths).unwrap().save(&paths).unwrap();
+        assert_eq!(std::fs::read_to_string(paths.config_file()).unwrap(), first);
+    }
+
+    #[test]
+    fn scan_and_skip_round_trip_and_come_before_the_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::new(Path::new("/Users/me"), dir.path());
+        let cfg: Config = toml::from_str(
+            "scan = [\"~/Code\", \"/srv\"]\nskip = [\"~/Code/scratch\"]\n\n[[repo]]\npath = \"/a\"\nbranch = \"main\"\n",
+        )
+        .unwrap();
+        cfg.save(&paths).unwrap();
+        let first = std::fs::read_to_string(paths.config_file()).unwrap();
+        assert!(
+            first.find("\nscan = ").unwrap() < first.find("\n[[repo]]").unwrap(),
+            "{first}"
+        );
+        assert!(
+            first.find("\nskip = ").unwrap() < first.find("\n[[repo]]").unwrap(),
+            "{first}"
+        );
+        let back = Config::load(&paths).unwrap();
+        assert_eq!(
+            back.scan,
+            Some(vec!["~/Code".to_string(), "/srv".to_string()])
+        );
+        assert_eq!(back.skip, ["~/Code/scratch"]);
+        back.save(&paths).unwrap();
+        assert_eq!(std::fs::read_to_string(paths.config_file()).unwrap(), first);
+        assert_eq!(
+            back.scan_roots(&paths).unwrap().unwrap(),
+            [PathBuf::from("/Users/me/Code"), PathBuf::from("/srv")]
+        );
+        assert_eq!(
+            back.skipped(&paths).unwrap(),
+            [PathBuf::from("/Users/me/Code/scratch")]
+        );
+    }
+
+    #[test]
+    fn an_empty_scan_is_kept_and_differs_from_an_absent_one() {
+        let paths = Paths::new(Path::new("/h"), Path::new("/c"));
+        let off: Config = toml::from_str("scan = []\n").unwrap();
+        assert_eq!(off.scan_roots(&paths).unwrap(), Some(vec![]));
+        assert!(toml::to_string(&off).unwrap().contains("scan = []"));
+        let absent: Config = toml::from_str("").unwrap();
+        assert_eq!(absent.scan_roots(&paths).unwrap(), None);
+    }
+
+    #[test]
+    fn a_bad_scan_or_skip_entry_fails_the_file_naming_it() {
+        let paths = Paths::new(Path::new("/h"), Path::new("/c"));
+        for (bad, named) in [
+            ("scan = [\"code\"]\n", "code"),
+            ("scan = [\"/ok\", \"../up\"]\n", "../up"),
+            ("skip = [\"scratch\"]\n", "scratch"),
+        ] {
+            let cfg: Config = toml::from_str(bad).unwrap();
+            let e = format!("{:#}", cfg.repos(&paths).unwrap_err());
+            assert!(e.contains(named), "{e}");
+        }
+        assert!(toml::from_str::<Config>("scan = \"~/Code\"\n").is_err());
+        assert!(toml::from_str::<Config>("watch = []\n").is_err());
     }
 }

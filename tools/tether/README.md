@@ -63,6 +63,9 @@ git tether add <path> --branch <b> [--mode follow|mirror] [--remote <r>] [--inte
                 [--gate <command>] [--after <command>]
 git tether set <repo> --interval <15m>
 git tether remove <path>
+git tether discover [--json]
+git tether skip <path>
+git tether unskip <path>
 git tether pause
 git tether resume
 ```
@@ -89,7 +92,13 @@ flag, an unknown mode, an interval under 30 s, a repo that is not listed) exit 2
   never pulled under a running session (ADR 0004 rule 6).
 - `set --interval` changes how often a listed repo is polled; the new interval
   applies from its next due check.
-- `remove` unlists a repo and forgets its last result; the clone is untouched.
+- `remove` unlists a repo and forgets its last result; the clone is untouched. The path also
+  goes into `skip`, so `discover` does not suggest it again.
+- `discover` walks the folders in `scan` (default: whichever of `~/Development`, `~/Code`,
+  `~/Projects`, `~/src`, `~/dev`, `~/work` exist; `scan = []` turns it off) and prints the
+  clones it suggests: ones with a remote, with the branch they would follow. It reads local refs
+  only, runs no fetch, and lists nothing; accept a suggestion with `add`. `skip` hides a clone
+  for good, `unskip` brings it back ([repository ADR 0004](../../docs/adr/0004-each-tool-suggests-the-clones-it-finds.md)).
 - `pause` / `resume` write or delete `~/.config/tether/paused`, which the tray
   and `sync --due` honour.
 
@@ -123,6 +132,10 @@ tip, it releases the lock and runs the repo's `after`.
 `~/.config/tether/repos.toml` (rule 1); `add`, `set` and `remove` edit it, and so can you.
 
 ```toml
+# optional (repository ADR 0004): where `discover` looks, and clones it never suggests
+scan = ["~/Development", "~/Code"]
+skip = ["~/Development/scratch"]
+
 [[repo]]
 path = "~/Development/notes"
 branch = "main"

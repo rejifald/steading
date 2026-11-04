@@ -7,6 +7,11 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- `git tether discover [--json]` suggests the clones it finds under the `scan` folders in
+  `repos.toml` (repository ADR 0004): clones with a remote, with the branch each would follow, read from
+  local refs without a fetch. It lists nothing; `add` does. `skip` and `unskip` edit the new
+  `skip` list, and `remove` now adds the removed path to it. A config using `scan` or `skip` is
+  not readable by an older binary.
 - `install.sh` now runs the repository's `scripts/install-app.sh`, which reap's installer shares;
   what it does is unchanged. `scripts/reinstall.sh`, set as the steading clone's `after`, rebuilds
   and reinstalls tether and reap whenever that clone moves.

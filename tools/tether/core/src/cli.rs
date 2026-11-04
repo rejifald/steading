@@ -1,4 +1,4 @@
-//! The CLI (rule 10): `git tether status|sync|add|remove|pause|resume`. It reads
+//! The CLI (rule 10): `git tether status|sync|add|remove|discover|skip|unskip|pause|resume`. It reads
 //! git and the config directly; there is no IPC with the tray app.
 
 use std::ffi::OsString;
@@ -8,10 +8,12 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
+use find_clones::Bounds;
 
 use crate::add::{self, AddOpts};
 use crate::config::{self, Mode};
 use crate::ctx::Ctx;
+use crate::discovery;
 use crate::paths::Paths;
 use crate::report;
 use crate::sync::{self, Outcome, Trigger};
@@ -97,6 +99,15 @@ enum Cmd {
     },
     /// Unlist a repo; its clone is left as it is.
     Remove { path: String },
+    /// Look for clones under the `scan` folders and suggest them; lists nothing (repository ADR 0004).
+    Discover {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Never suggest a clone again (adds it to `skip` in repos.toml).
+    Skip { path: String },
+    /// Suggest a skipped clone again.
+    Unskip { path: String },
     /// Pause background sync (the tray's timers and `sync --due`).
     Pause,
     /// Resume background sync.
@@ -207,6 +218,28 @@ fn dispatch(cmd: Cmd) -> Result<i32> {
             }
             None => Err(UsageError(format!("{path} is not listed in repos.toml")).into()),
         },
+        Cmd::Discover { json } => discover_cmd(&paths, json),
+        Cmd::Skip { path } => {
+            let shown = clone_arg(&paths, &path)?;
+            discovery::skip(&paths, &path)?;
+            println!("{shown} will not be suggested; `git tether unskip` undoes it");
+            Ok(0)
+        }
+        Cmd::Unskip { path } => {
+            let shown = clone_arg(&paths, &path)?;
+            let config = config::Config::load(&paths)?;
+            let at = paths.expand(&shown);
+            if !config
+                .skipped(&paths)?
+                .iter()
+                .any(|k| config::same_path(k, &at))
+            {
+                return Err(UsageError(format!("{shown} is not skipped")).into());
+            }
+            discovery::unskip(&paths, &path)?;
+            println!("{shown} can be suggested again");
+            Ok(0)
+        }
         Cmd::Pause => {
             paths.set_paused(true)?;
             println!("background sync paused; `git tether sync` still runs on request");
@@ -218,6 +251,68 @@ fn dispatch(cmd: Cmd) -> Result<i32> {
             Ok(0)
         }
     }
+}
+
+/// A path argument of `skip` / `unskip`, shown as `repos.toml` keeps it; a relative one is a usage error.
+fn clone_arg(paths: &Paths, arg: &str) -> Result<String> {
+    let expanded = paths.expand(arg.trim());
+    if expanded.is_absolute() {
+        Ok(paths.tilde(&expanded))
+    } else {
+        Err(UsageError(format!(
+            "{arg}: give an absolute path or one starting with ~/"
+        ))
+        .into())
+    }
+}
+
+fn discover_cmd(paths: &Paths, json: bool) -> Result<i32> {
+    discovery::scan(paths, &Bounds::default(), &mut |_| {})?;
+    let v = discovery::view(paths, None)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        print!("{}", render_discovery(&v));
+    }
+    Ok(0)
+}
+
+fn render_discovery(v: &discovery::View) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    if v.roots.is_empty() {
+        out.push_str("no folder to look in: set scan = [\"~/Development\"] in repos.toml\n");
+    }
+    for r in &v.roots {
+        let fact = match (&r.error, r.clones) {
+            (Some(e), _) => format!("error: {e}"),
+            (None, Some(n)) => format!(
+                "{n} clone{}{}",
+                if n == 1 { "" } else { "s" },
+                if r.stopped_early {
+                    ", stopped early"
+                } else {
+                    ""
+                }
+            ),
+            (None, None) => "not scanned".into(),
+        };
+        let _ = writeln!(out, "looked in {}: {fact}", r.path);
+    }
+    if v.suggestions.is_empty() {
+        out.push_str("no suggestions\n");
+    } else {
+        let _ = writeln!(
+            out,
+            "{} suggestion{} (list one with `git tether add <path> --branch <branch>`):",
+            v.suggestions.len(),
+            if v.suggestions.len() == 1 { "" } else { "s" }
+        );
+    }
+    for s in &v.suggestions {
+        let _ = writeln!(out, "  {}  {}  {}", s.name, s.branch, s.path);
+    }
+    out
 }
 
 fn sync_cmd(
@@ -311,6 +406,9 @@ mod tests {
         assert_eq!(run(["tether", "set", "notes"]), 2, "set needs --interval");
         assert_eq!(run(["tether", "set", "notes", "--interval", "10s"]), 2);
         assert_eq!(run(["tether", "frobnicate"]), 2);
+        assert_eq!(run(["tether", "skip"]), 2, "skip needs a path");
+        assert_eq!(run(["tether", "unskip"]), 2, "unskip needs a path");
+        assert_eq!(run(["tether", "discover", "--depth", "9"]), 2);
         assert_eq!(run(["tether", "sync", "notes", "--due"]), 2);
     }
 
@@ -342,6 +440,10 @@ mod tests {
             ],
             &["set", "notes", "--interval", "15m"],
             &["remove", "/m"],
+            &["discover"],
+            &["discover", "--json"],
+            &["skip", "~/Development/scratch"],
+            &["unskip", "~/Development/scratch"],
             &["pause"],
             &["resume"],
         ] {
