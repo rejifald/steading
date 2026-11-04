@@ -1,9 +1,8 @@
-import { ScrollArea } from "@base-ui/react/scroll-area";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import type { Repo, State, Worktree, WorktreeAction } from "../api";
 import { shownSize, totalSizeOf } from "../shownSize";
-import { EmptyState } from "./EmptyState";
+import { ListScroll } from "./ListScroll";
 import { NothingToRemove } from "./NothingToRemove";
 import { type Outcome, outcomeOf } from "./outcomeOf";
 import { OutcomeSection } from "./OutcomeSection";
@@ -22,9 +21,10 @@ interface WorktreeListProps {
   repos: Repo[];
   now: Date;
   onAction: (action: WorktreeAction, path: string) => Promise<boolean> | void;
-  onAdd: () => void;
   /** Worktrees whose removal is running, by path. */
   removing?: ReadonlySet<string>;
+  /** The Found section: the last thing in the scroll, after the outcome sections and the notes. */
+  found?: ReactNode;
 }
 
 interface Entry {
@@ -79,9 +79,8 @@ function readyLeadOf(entries: Entry[]): string {
 }
 
 /** The scrolling middle of the popover: worktrees grouped by outcome across repos. */
-export function WorktreeList({ repos, now, onAction, onAdd, removing = NONE_REMOVING }: WorktreeListProps) {
+export function WorktreeList({ repos, now, onAction, removing = NONE_REMOVING, found = null }: WorktreeListProps) {
   const [isConfirmingRemoveAll, setIsConfirmingRemoveAll] = useState(false);
-  if (repos.length === 0) return <EmptyState onAdd={onAdd} />;
   const needsYou = entriesOf(repos, "needs-you");
   const reposWithError = repos.filter((repo) => repo.error);
   const needsYouCount = needsYou.length + reposWithError.length;
@@ -107,55 +106,51 @@ export function WorktreeList({ repos, now, onAction, onAdd, removing = NONE_REMO
   );
 
   return (
-    <ScrollArea.Root className="relative min-h-0 flex-1">
-      <ScrollArea.Viewport className="h-full focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
-        <OutcomeSection outcome="needs-you" title="Needs you" count={needsYouCount} isRaised>
-          {reposWithError.map((repo) => (
-            <RepoErrorRow key={repo.path} repo={repo} onAction={onAction} />
-          ))}
-          {needsYou.map((entry) => row(entry, true))}
-        </OutcomeSection>
-        {needsYouCount === 0 && ready.length === 0 && <NothingToRemove />}
-        <OutcomeSection
-          outcome="ready"
-          title="Ready to remove"
-          count={ready.length}
-          size={sizeOf(ready)}
-          lead={
-            isConfirmingRemoveAll ? (
-              <RemoveAllConfirm
-                paths={removablePaths}
-                onAction={onAction}
-                onClose={() => setIsConfirmingRemoveAll(false)}
-              />
-            ) : (
-              readyLeadOf(ready)
-            )
-          }
-          action={
-            isConfirmingRemoveAll || removablePaths.length === 0 ? null : (
-              <RemoveAllButton count={removablePaths.length} onClick={() => setIsConfirmingRemoveAll(true)} />
-            )
-          }
-          limit={READY_ROW_LIMIT}
-        >
-          {ready.map((entry) => row(entry))}
-        </OutcomeSection>
-        <OutcomeSection outcome="held" title="Merged, but held" count={held.length} collapsible summary={heldSummaryOf(held)}>
-          {held.map((entry) => row(entry))}
-        </OutcomeSection>
-        <OutcomeSection outcome="in-progress" title="In progress" count={inProgress.length} collapsible summary="not merged yet">
-          {inProgress.map((entry) => row(entry))}
-        </OutcomeSection>
-        <OutcomeSection outcome="kept" title="Kept" count={kept.length} collapsible summary="until new commits">
-          {kept.map((entry) => row(entry))}
-        </OutcomeSection>
-        <SalvagedSection repos={repos} now={now} />
-        <RepoNotes repos={repos} />
-      </ScrollArea.Viewport>
-      <ScrollArea.Scrollbar className="flex w-2 justify-center py-1 opacity-0 data-hovering:opacity-100 data-scrolling:opacity-100">
-        <ScrollArea.Thumb className="w-full rounded-full bg-border" />
-      </ScrollArea.Scrollbar>
-    </ScrollArea.Root>
+    <ListScroll>
+      <OutcomeSection outcome="needs-you" title="Needs you" count={needsYouCount} isRaised>
+        {reposWithError.map((repo) => (
+          <RepoErrorRow key={repo.path} repo={repo} onAction={onAction} />
+        ))}
+        {needsYou.map((entry) => row(entry, true))}
+      </OutcomeSection>
+      {needsYouCount === 0 && ready.length === 0 && <NothingToRemove />}
+      <OutcomeSection
+        outcome="ready"
+        title="Ready to remove"
+        count={ready.length}
+        size={sizeOf(ready)}
+        lead={
+          isConfirmingRemoveAll ? (
+            <RemoveAllConfirm
+              paths={removablePaths}
+              onAction={onAction}
+              onClose={() => setIsConfirmingRemoveAll(false)}
+            />
+          ) : (
+            readyLeadOf(ready)
+          )
+        }
+        action={
+          isConfirmingRemoveAll || removablePaths.length === 0 ? null : (
+            <RemoveAllButton count={removablePaths.length} onClick={() => setIsConfirmingRemoveAll(true)} />
+          )
+        }
+        limit={READY_ROW_LIMIT}
+      >
+        {ready.map((entry) => row(entry))}
+      </OutcomeSection>
+      <OutcomeSection outcome="held" title="Merged, but held" count={held.length} collapsible summary={heldSummaryOf(held)}>
+        {held.map((entry) => row(entry))}
+      </OutcomeSection>
+      <OutcomeSection outcome="in-progress" title="In progress" count={inProgress.length} collapsible summary="not merged yet">
+        {inProgress.map((entry) => row(entry))}
+      </OutcomeSection>
+      <OutcomeSection outcome="kept" title="Kept" count={kept.length} collapsible summary="until new commits">
+        {kept.map((entry) => row(entry))}
+      </OutcomeSection>
+      <SalvagedSection repos={repos} now={now} />
+      <RepoNotes repos={repos} />
+      {found}
+    </ListScroll>
   );
 }
