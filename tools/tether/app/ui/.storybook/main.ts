@@ -7,14 +7,14 @@ const DARK_BLOCK = /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{(\s*):root\s*\
 /**
  * Storybook-only: `theme.css` picks dark or light from the system, which a story cannot set.
  * Rewrites every dark block to follow `<html data-theme="dark">` instead, which the toolbar's
- * Theme switch sets (`preview.tsx`). It runs after Tailwind has inlined the package's `theme.css`
- * (a `pre` transform sees only the `@import`), so the package's tokens switch too.
+ * Theme switch sets (`preview.tsx`). As a normal plugin it runs after Tailwind's `pre` transforms
+ * have inlined the package's `theme.css`, so the package's tokens switch too, and before Vite turns
+ * the CSS into JS (`enforce: "post"` would see only that JS, or an empty string in a build).
  * The app's own build never runs this plugin.
  */
 function themeByAttribute(): Plugin {
   return {
     name: "tether:theme-by-attribute",
-    enforce: "post",
     transform(code, id) {
       if (!id.split("?")[0].endsWith("/src/theme.css")) return null;
       // `:root[data-theme="dark"] { & { …tokens } }`: the same tokens, nested under the attribute.
