@@ -196,11 +196,86 @@ describe("Popover", () => {
     await waitFor(() => expect(screen.queryByText("refreshing…")).not.toBeInTheDocument());
   });
 
-  it("toggles Pause to Resume and says Paused in the header", async () => {
+  it("marks a row removing, with the header hairline, while Remove now runs", async () => {
+    const { user } = setup({ holdsRemovals: true });
+    const row = await screen.findByRole("listitem", { name: "fix/login" });
+    await user.click(within(row).getByRole("button", { name: "Remove now" }));
+    expect(row).toHaveAttribute("aria-busy", "true");
+    expect(within(row).getByText("removing…")).toBeInTheDocument();
+    expect(within(row).queryByRole("button", { name: "Remove now" })).not.toBeInTheDocument();
+    expect(screen.getByRole("banner").querySelector(".animate-progress")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /^Remove all/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps a row removing when a report still lists its worktree", async () => {
+    const { api, user } = setup({ holdsRemovals: true });
+    const row = await screen.findByRole("listitem", { name: "fix/login" });
+    await user.click(within(row).getByRole("button", { name: "Remove now" }));
+    await api.refresh();
+    // The header keeps "needs you" ahead of "refreshing…", so the footer shows the refresh.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled());
+    expect(screen.getByRole("listitem", { name: "fix/login" })).toHaveAttribute("aria-busy", "true");
+    expect(within(screen.getByRole("listitem", { name: "fix/login" })).getByText("removing…")).toBeInTheDocument();
+  });
+
+  it("drops the row when a report no longer lists the removed worktree", async () => {
+    const inner = createFakeApi({ holdsRemovals: true });
+    let emit: (snapshot: Snapshot) => void = () => {};
+    const api = {
+      ...inner,
+      onReport: async (handler: (snapshot: Snapshot) => void) => {
+        emit = handler;
+        return inner.onReport(handler);
+      },
+    };
+    const user = userEvent.setup();
+    render(<Popover api={api} />);
+    const row = await screen.findByRole("listitem", { name: "fix/login" });
+    await user.click(within(row).getByRole("button", { name: "Remove now" }));
+    const current = await inner.report();
+    const report = current.report;
+    if (!report) throw new Error("the fake has a report");
+    emit({
+      ...current,
+      report: {
+        ...report,
+        repos: report.repos.map((repo) => ({
+          ...repo,
+          worktrees: repo.worktrees.filter((worktree) => worktree.branch !== "fix/login"),
+        })),
+      },
+    });
+    await waitFor(() => expect(screen.queryByRole("listitem", { name: "fix/login" })).not.toBeInTheDocument());
+  });
+
+  it("keeps the last report under a notice when repos.toml stops reading", async () => {
+    setup({ repos: [readyRepo(1)], error: "expected `=` at line 4" });
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Cannot read repos.toml: expected `=` at line 4. Showing the last report.",
+    );
+    expect(screen.getByRole("listitem", { name: "feat/done-0" })).toBeInTheDocument();
+  });
+
+  it("says refreshing in the header while a refresh runs", async () => {
+    setup({ refreshing: true, repos: [readyRepo(1)] });
+    await screen.findByRole("banner");
+    expect(screen.getByRole("status")).toHaveTextContent("refreshing…");
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
+  });
+
+  it("says paused in the header even while something needs you", async () => {
+    setup({ paused: true });
+    await screen.findByRole("banner");
+    expect(screen.getByRole("status")).toHaveTextContent(/^paused$/);
+  });
+
+  it("toggles Pause to Resume, says paused in the header, and makes Resume the primary action", async () => {
     const { user } = setup();
     await user.click(await screen.findByRole("button", { name: "Pause" }));
-    expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
-    expect(screen.getByText("Paused")).toBeInTheDocument();
+    const resume = await screen.findByRole("button", { name: "Resume" });
+    expect(screen.getByRole("status")).toHaveTextContent(/^paused$/);
+    expect(resume).toHaveClass("bg-accent");
+    expect(screen.getByRole("button", { name: "Add repository" })).not.toHaveClass("bg-accent");
   });
 
   it("shows the read error panel and reloads from Try again", async () => {

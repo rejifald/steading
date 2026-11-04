@@ -6,6 +6,7 @@ interface FooterProps {
   /** Before the first report: the full footer, with Refresh disabled. */
   isLoading?: boolean;
   isRefreshing?: boolean;
+  /** Resume becomes the primary action and Add repository goes quiet. */
   paused: boolean;
   onRefresh: () => void;
   onTogglePause: () => void;
@@ -30,9 +31,11 @@ export function Footer({
           Refresh
         </TextButton>
       )}
-      <TextButton onClick={onTogglePause}>{paused ? "Resume" : "Pause"}</TextButton>
+      <TextButton variant={paused ? "primary" : "quiet"} onClick={onTogglePause}>
+        {paused ? "Resume" : "Pause"}
+      </TextButton>
       {showsRepoActions && (
-        <TextButton variant="primary" className="ml-auto" onClick={onAdd}>
+        <TextButton variant={paused ? "quiet" : "primary"} className="ml-auto" onClick={onAdd}>
           Add repository
         </TextButton>
       )}

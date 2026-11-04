@@ -1,11 +1,10 @@
 import { useState } from "react";
 
+import { PopoverWindow } from "@steading/tray-popover/storybook/decorators";
+
 import { createFakeApi, type FakeOptions } from "./api.fake";
 import { SCENARIOS } from "./api.scenarios";
 import { Popover } from "./Popover";
-
-/** The tray window's size: 360 wide, at most 480 tall (docs/design/popover/anatomy.md § 1). */
-const WINDOW = { width: 360, height: 480 } as const;
 
 interface ScenarioPopoverProps {
   /** A key of `SCENARIOS`, as `/?scenario=<name>` takes it. */
@@ -26,8 +25,8 @@ export function ScenarioPopover(props: ScenarioPopoverProps) {
 function ScenarioFrame({ scenario, options }: ScenarioPopoverProps) {
   const [api] = useState(() => createFakeApi({ ...SCENARIOS[scenario], ...options }));
   return (
-    <div style={WINDOW}>
+    <PopoverWindow>
       <Popover api={api} />
-    </div>
+    </PopoverWindow>
   );
 }

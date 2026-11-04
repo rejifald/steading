@@ -5,9 +5,10 @@ export function LoadingRows() {
   return (
     <div aria-busy="true" className="flex flex-1 flex-col gap-6 p-4">
       {NAME_BAR_WIDTHS.map((width) => (
-        <div key={width} className="flex items-center justify-between">
+        <div key={width} className="flex items-center gap-2">
+          <span className="size-4 shrink-0 rounded-full bg-surface-raised" />
           <span className={`h-3 rounded-control bg-surface-raised ${width}`} />
-          <span className="h-3 w-16 rounded-control bg-surface-raised" />
+          <span className="ml-auto h-3 w-16 rounded-control bg-surface-raised" />
         </div>
       ))}
     </div>

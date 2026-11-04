@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 
 import type { State } from "../api";
-import { STATE_LABELS, STATE_TONES, StateLabel } from "../StateLabel";
+import { STATE_LABELS, StateLabel } from "../StateLabel";
+import { outcomeOf } from "./outcomeOf";
 
 interface WorktreeLineProps {
   name: string;
@@ -23,7 +24,7 @@ export function WorktreeLine({ name, detail, state, ghost = false, children }: W
       <span className="flex-1 truncate text-faint">{detail}</span>
       {children}
       <span className="w-22 text-xs text-muted">
-        {state ? <StateLabel tone={STATE_TONES[state]} label={STATE_LABELS[state]} /> : null}
+        {state ? <StateLabel glyph={outcomeOf(state)} label={STATE_LABELS[state]} /> : null}
       </span>
     </div>
   );

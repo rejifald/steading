@@ -113,13 +113,25 @@ export interface FakeOptions {
   repos?: Repo[];
   /** The folder the fake picker returns; `null` acts as Cancel. */
   pickedFolder?: string | null;
+  /** Starts paused. */
+  paused?: boolean;
+  /** Starts mid-refresh, and stays there: the refreshing state, held still for a story. */
+  refreshing?: boolean;
+  /** Remove now never finishes: the removing state, held still for a test or a story. */
+  holdsRemovals?: boolean;
+  /** repos.toml cannot be read: with no `repos`, the read-error panel; with them, the notice. */
+  error?: string;
+  /** The app's last failed action, shown in the notice strip. */
+  note?: string;
+  /** The first report never arrives: the skeleton. */
+  isLoading?: boolean;
 }
 
 /** An in-memory app for tests and for `npm run dev` in a plain browser. */
 export function createFakeApi(options: FakeOptions = {}): ReapApi {
   let repos = options.repos ?? sampleRepos();
-  let paused = false;
-  let refreshing = false;
+  let paused = options.paused ?? false;
+  let refreshing = options.refreshing ?? false;
   const pickedFolder =
     options.pickedFolder === undefined ? "~/Development/example-new" : options.pickedFolder;
   const handlers = new Set<(s: Snapshot) => void>();
@@ -133,7 +145,10 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
       needs_you: states.filter((state) => state === "stale" || state === "refused").length,
       repos,
     };
-    return { report, error: null, refreshing, note: null };
+    if (options.error !== undefined && options.repos === undefined) {
+      return { report: null, error: options.error, refreshing, note: null };
+    }
+    return { report, error: options.error ?? null, refreshing, note: options.note ?? null };
   };
   const emit = () => handlers.forEach((handler) => handler(snapshot()));
   const setState = (path: string, state: Worktree["state"]) => {
@@ -145,7 +160,7 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
   };
 
   return {
-    report: async () => snapshot(),
+    report: () => (options.isLoading ? new Promise<Snapshot>(() => {}) : Promise.resolve(snapshot())),
     onReport: async (handler) => {
       handlers.add(handler);
       return () => handlers.delete(handler);
@@ -184,6 +199,7 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
       if (target && target.state !== "removable" && target.state !== "refused") {
         throw `${path} is not removable`;
       }
+      if (options.holdsRemovals) return new Promise<void>(() => {});
       repos = repos.map((repo) => ({ ...repo, worktrees: repo.worktrees.filter((worktree) => worktree.path !== path) }));
       emit();
     },

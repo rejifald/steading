@@ -6,6 +6,7 @@
 /* This package's components use utilities too; the stories are not the app. */
 @source "./";
 @source not "./**/*.stories.tsx";
+@source not "./storybook";
 
 @theme {
   --color-*: initial;

@@ -1,9 +1,12 @@
-import type { Repo, Worktree, WorktreeAction } from "../api";
 import { BinIcon, FolderIcon, PinIcon } from "@steading/tray-popover/controls/icons";
 import { IconButton } from "@steading/tray-popover/controls/IconButton";
 import { TextButton } from "@steading/tray-popover/controls/TextButton";
+import { ProgressLine } from "@steading/tray-popover/ProgressLine";
+
+import type { Repo, Worktree, WorktreeAction } from "../api";
 import { shownSize } from "../shownSize";
 import { ago, inTime } from "./ago";
+import { NeedsYouCallout } from "./NeedsYouCallout";
 import { sentenceOf } from "./sentenceOf";
 
 interface WorktreeRowProps {
@@ -11,8 +14,10 @@ interface WorktreeRowProps {
   repo: Pick<Repo, "name" | "policy">;
   now: Date;
   onAction: (action: WorktreeAction, path: string) => void;
-  /** A Needs-you row: the sentence wraps and the buttons are text buttons below it. */
+  /** A Needs-you row: a raised callout whose sentence wraps, with text buttons below it. */
   emphasis?: boolean;
+  /** A removal of this worktree is running: the progress wash and hairline, `removing…`. */
+  isRemoving?: boolean;
 }
 
 const ACTIONS_HIDDEN_UNTIL_HOVER =
@@ -71,42 +76,47 @@ function RowActions({ worktree, onAction }: Pick<WorktreeRowProps, "worktree" | 
 }
 
 /** One worktree as two lines: the branch and where it lives, then what happens to it. */
-export function WorktreeRow({ worktree, repo, now, onAction, emphasis = false }: WorktreeRowProps) {
+export function WorktreeRow({ worktree, repo, now, onAction, emphasis = false, isRemoving = false }: WorktreeRowProps) {
   const meta = metaOf(worktree, repo, now);
   const sentence = sentenceOf(worktree, repo, now);
+  if (emphasis) {
+    return (
+      <li aria-label={titleOf(worktree)} aria-description={descriptionOf(worktree, now)}>
+        <NeedsYouCallout title={titleOf(worktree)} meta={meta} sentence={sentence}>
+          {worktree.state === "refused" && (
+            <>
+              <TextButton variant="inset" onClick={() => onAction("remove-now", worktree.path)}>
+                Try again
+              </TextButton>
+              <TextButton variant="inset" onClick={() => onAction("keep", worktree.path)}>
+                Keep
+              </TextButton>
+            </>
+          )}
+          <TextButton variant="inset" onClick={() => onAction("open", worktree.path)}>
+            Open in Finder
+          </TextButton>
+        </NeedsYouCallout>
+      </li>
+    );
+  }
+  const surface = isRemoving ? "bg-progress/10" : "hover:bg-surface-hover focus-within:bg-surface-hover";
   return (
     <li
       aria-label={titleOf(worktree)}
       aria-description={descriptionOf(worktree, now)}
-      className="group flex flex-col gap-0.5 px-4 py-1.5 text-sm hover:bg-surface-hover focus-within:bg-surface-hover"
+      aria-busy={isRemoving || undefined}
+      className={`group relative flex flex-col gap-0.5 px-4 py-1.5 text-sm ${surface}`}
     >
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-medium text-text">{titleOf(worktree)}</span>
-        {!emphasis && <RowActions worktree={worktree} onAction={onAction} />}
-        <span className="shrink-0 text-xs text-faint">{meta}</span>
+        {!isRemoving && <RowActions worktree={worktree} onAction={onAction} />}
+        <span className={`shrink-0 text-xs ${isRemoving ? "text-progress" : "text-faint"}`}>
+          {isRemoving ? "removing…" : meta}
+        </span>
       </div>
-      {emphasis ? (
-        <>
-          <p className="text-xs text-needs-you">{sentence}</p>
-          <div className="flex gap-2 pt-1">
-            {worktree.state === "refused" && (
-              <>
-                <TextButton variant="inset" onClick={() => onAction("remove-now", worktree.path)}>
-                  Try again
-                </TextButton>
-                <TextButton variant="inset" onClick={() => onAction("keep", worktree.path)}>
-                  Keep
-                </TextButton>
-              </>
-            )}
-            <TextButton variant="inset" onClick={() => onAction("open", worktree.path)}>
-              Open in Finder
-            </TextButton>
-          </div>
-        </>
-      ) : (
-        <p className="truncate text-xs text-muted">{sentence}</p>
-      )}
+      <p className="truncate text-xs text-muted">{sentence}</p>
+      {isRemoving && <ProgressLine inset />}
     </li>
   );
 }

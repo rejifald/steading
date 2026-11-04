@@ -3,8 +3,8 @@ import { Collapsible } from "@base-ui/react/collapsible";
 import { Children, type ReactNode, useState } from "react";
 
 import { ChevronRightIcon } from "@steading/tray-popover/controls/icons";
-import { DOT_COLOURS } from "../StateLabel";
-import { type Outcome, OUTCOME_TONES } from "./outcomeOf";
+import { GlyphIcon } from "../StateLabel";
+import type { Outcome } from "./outcomeOf";
 
 interface OutcomeSectionProps {
   outcome: Outcome;
@@ -22,24 +22,31 @@ interface OutcomeSectionProps {
   summary?: string;
   /** Rows shown before "Show N more". */
   limit?: number;
+  /** The rows are raised callouts (Needs you): inset, with a gap between them. */
+  isRaised?: boolean;
   children: ReactNode;
 }
 
 const FOCUS_RING = "focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
-function Dot({ outcome }: { outcome: Outcome }) {
-  return <span aria-hidden className={`size-2 shrink-0 rounded-full ${DOT_COLOURS[OUTCOME_TONES[outcome]]}`} />;
+/** The rows of a section as a list, cut to `limit` until "Show N more" is clicked. */
+interface RowsProps {
+  title: string;
+  limit: number | undefined;
+  isRaised?: boolean;
+  children: ReactNode;
 }
 
-/** The rows of a section as a list, cut to `limit` until "Show N more" is clicked. */
-function Rows({ title, limit, children }: { title: string; limit: number | undefined; children: ReactNode }) {
+function Rows({ title, limit, isRaised = false, children }: RowsProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const rows = Children.toArray(children);
   const hiddenCount = limit === undefined || isExpanded ? 0 : Math.max(0, rows.length - limit);
   const visibleRows = hiddenCount > 0 ? rows.slice(0, limit) : rows;
   return (
     <>
-      <ul aria-label={title}>{visibleRows}</ul>
+      <ul aria-label={title} className={isRaised ? "flex flex-col gap-2 px-4 pt-1 pb-2" : undefined}>
+        {visibleRows}
+      </ul>
       {hiddenCount > 0 && (
         <Button
           onClick={() => setIsExpanded(true)}
@@ -63,6 +70,7 @@ export function OutcomeSection({
   collapsible = false,
   summary,
   limit,
+  isRaised = false,
   children,
 }: OutcomeSectionProps) {
   if (count === 0) return null;
@@ -74,7 +82,7 @@ export function OutcomeSection({
             className={`group flex min-h-8 w-full flex-wrap items-center gap-x-2 border-t border-border px-4 py-1.5 text-sm hover:bg-surface-hover ${FOCUS_RING}`}
           >
             <ChevronRightIcon className="shrink-0 text-muted group-data-panel-open:rotate-90" />
-            <Dot outcome={outcome} />
+            <GlyphIcon glyph={outcome} />
             <span className="font-semibold whitespace-nowrap text-text">{title}</span>
             <span className="text-faint">{count}</span>
             {/* Wraps under the title when it does not fit beside it, still right-aligned. */}
@@ -93,14 +101,14 @@ export function OutcomeSection({
     <section aria-label={title}>
       <div className="flex items-center gap-2 px-4 pt-3 pb-1">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-text">
-          <Dot outcome={outcome} />
+          <GlyphIcon glyph={outcome} />
           {title}
           <span className="font-normal text-faint">{size ? `${count} · ${size}` : count}</span>
         </h2>
         {action && <span className="ml-auto">{action}</span>}
       </div>
       {lead && <div className="px-4 pb-1 text-xs text-muted">{lead}</div>}
-      <Rows title={title} limit={limit}>
+      <Rows title={title} limit={limit} isRaised={isRaised}>
         {children}
       </Rows>
     </section>

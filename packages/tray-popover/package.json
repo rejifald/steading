@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./theme.css": "./src/theme.css",
+    "./storybook/themeByAttribute": "./src/storybook/themeByAttribute.ts",
     "./*": "./src/*.tsx"
   },
   "scripts": {
