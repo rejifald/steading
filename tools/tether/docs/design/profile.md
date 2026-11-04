@@ -60,7 +60,9 @@ English, sentence case, short; buttons are verbs. State words and reasons are th
 ## Design docs home
 
 `docs/design/<surface>/anatomy.md`, with frozen artboard images in `docs/design/<surface>/reference/`.
-Read `docs/styleguide.md` and ADR 0002 first.
+Read `docs/styleguide.md` and ADR 0002 first. A surface both tools draw lives at the repository
+root instead: [`docs/design/discovery/`](../../../../docs/design/discovery/anatomy.md) (clone
+discovery), whose reference is the design canvas's `.dc.html` source.
 
 ## Capturing the current state
 
