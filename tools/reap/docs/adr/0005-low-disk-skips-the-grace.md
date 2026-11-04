@@ -1,6 +1,6 @@
 # ADR 0005: on a low disk, removable worktrees go without waiting out their grace
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-05
 - **Amends:** [ADR 0001](0001-reap-sweeps-merged-worktrees.md), rule 10
 
@@ -78,5 +78,3 @@ what each removal frees (`disk_usage`), so it can pick the removals that free th
   the operator knows what to remove.
 - `statfs` counts purgeable APFS space (local snapshots, caches) as used, so reap can act while
   Finder shows more free space than the threshold. `low_disk` sets the level.
-- When this is accepted, ADR 0001's status line lists rule 10 as amended by
-  ADR low-disk-skips-the-grace, and `config.rs`'s example gains `low_disk`.

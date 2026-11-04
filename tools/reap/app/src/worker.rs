@@ -1,7 +1,8 @@
 //! The one thread that runs git: a pass every `interval` and whenever the popover opens or asks
 //! (rule 7). A burst of requests is handled as one. A pass sweeps every listed repo: it fetches
-//! what moved, runs the grace clocks and removes what is due; while paused it only reads. After
-//! every pass the report is published to the icon and the popover.
+//! what moved, runs the grace clocks and removes what is due, then frees space on any low volume
+//! (ADR low-disk-skips-the-grace); while paused it only reads. After every pass the report is
+//! published to the icon and the popover.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -14,7 +15,7 @@ use chrono::Utc;
 use reap_core::config::{Config, DEFAULT_INTERVAL};
 use reap_core::ctx::Ctx;
 use reap_core::report::{self, Report};
-use reap_core::sweep::{self, Outcome};
+use reap_core::sweep::{self, Swept};
 use tauri::AppHandle;
 
 use crate::logic::{self, Event};
@@ -65,8 +66,8 @@ fn pass(app: &AppHandle, state: &Arc<State>, needed_you: &mut HashSet<String>, i
     let result = sweep_or_read(state);
     *state.note.lock().unwrap() = None;
     match result {
-        Ok((report, outcomes)) => {
-            let mut messages = logic::notifications(&outcomes);
+        Ok((report, swept)) => {
+            let mut messages = logic::notifications(&swept.repos, &swept.volumes);
             for (path, why) in logic::new_needs_you(needed_you, &report) {
                 if !is_first {
                     messages.push(("reap needs you".into(), format!("{path}: {why}")));
@@ -87,16 +88,23 @@ fn pass(app: &AppHandle, state: &Arc<State>, needed_you: &mut HashSet<String>, i
     tray::publish(app, state);
 }
 
-fn sweep_or_read(state: &State) -> Result<(Report, Vec<Outcome>)> {
+fn sweep_or_read(state: &State) -> Result<(Report, Swept)> {
     let now = Utc::now();
     if state.paths.is_paused() {
-        return Ok((report::report(&state.paths, now)?, Vec::new()));
+        return Ok((report::report(&state.paths, now)?, Swept::default()));
     }
     let ctx = Ctx::new(state.paths.clone(), false);
-    let outcomes = sweep::sweep(&ctx, None, Duration::ZERO, now)?;
-    let repos = outcomes
+    // Every pass is followed by the pressure pass over the volumes (ADR low-disk-skips-the-grace).
+    let swept = sweep::sweep_all(&ctx, Duration::ZERO, now)?;
+    let repos = swept
+        .repos
         .iter()
         .map(|outcome| outcome.report.clone())
         .collect();
-    Ok((report::summarize(&state.paths, repos), outcomes))
+    let volumes = swept
+        .volumes
+        .iter()
+        .map(|pressure| pressure.volume.clone())
+        .collect();
+    Ok((report::summarize(&state.paths, repos, volumes), swept))
 }
