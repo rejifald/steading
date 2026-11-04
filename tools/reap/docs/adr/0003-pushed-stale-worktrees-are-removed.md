@@ -1,6 +1,7 @@
 # ADR 0003: a stale worktree whose commits are all pushed is removed, its branch kept
 
-- **Status:** Accepted
+- **Status:** Accepted; rule 3 amended by
+  [ADR 0006](0006-abandoned-worktrees-are-saved-then-offered.md)
 - **Date:** 2026-10-31
 - **Amends:** [ADR 0001](0001-reap-sweeps-merged-worktrees.md), rule 13
 

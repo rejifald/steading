@@ -42,11 +42,13 @@ Rows carry no glyph of their own: their section already says it.
 
 | Section | States | Glyph, colour | Shown |
 |---|---|---|---|
-| *Needs you* | `stale`, `refused`, and a repo reap cannot read | triangle, `needs-you` | open; each a raised callout: triangle, branch and `repo · age` in a tinted strip, the reason in full and text buttons below |
+| *Needs you* | `abandoned`, `stale`, `refused`, and a repo reap cannot read | triangle, `needs-you` | open; each a raised callout: triangle, branch and `repo · age` in a tinted strip, the reason in full and text buttons below: *Save and remove* and *Keep* on an abandoned row (`Saving…` while it runs), *Try again* and *Keep* on a refused one |
 | *Ready to remove* | `removable`, `missing` | bin, `removable` | open; the disk they free after the count, a lead line on the policy, 4 rows then *Show N more*, *Remove all N* with a confirm in a plain callout |
 | *Merged, but held* | `dirty`, `in use`, `locked` | pause, `held` | collapsed, with the count of each kind and the disk held by uncommitted changes (`4 uncommitted (9.3 GB)`); a summary too long for the line wraps under the title |
 | *In progress* | `open` | dashed circle, `open` | collapsed |
 | *Kept* | `kept` | pin, `open` | collapsed |
+| *Saved abandoned work* | saves of abandoned worktrees | pin, `open` | collapsed, `kept until you delete it`; each row its restore command and *Delete*, which asks again (*Delete for good*, *Cancel*) |
+| *Salvaged* | saves of merged worktrees' changes | pin, `open` | collapsed; each row when it is deleted and its restore command |
 
 An empty section is not shown. With nothing in *Needs you* or *Ready*, *Nothing to remove*
 takes their place.
@@ -68,7 +70,10 @@ config cannot be read), `paused`, `needs you (n)`, `refreshing…` (a spinning a
 - **Sections:** in the order of the table above, across all repos.
 - **Rows:** two lines. Line 1 is the branch (the folder name when HEAD is detached), then
   `repo · age · size` in `faint` (age and size left out when unknown); line 2 is the sentence in `muted`, built from the CLI's reason
-  (`Merged in #403 · removes in 3 h`). Hover or focus shows the row's actions as icon buttons;
+  (`Merged in #403 · removes in 3 h`; `In #212, merged` for a pull request found by HEAD's
+  commit). A stale or abandoned row names everything local in it
+  (`No commit or checkout for 119 days · 13 uncommitted changes · 22 commits on no remote`);
+  `reap won’t remove it:` and the guard follow only when a guard holds it. Hover or focus shows the row's actions as icon buttons;
   the folder name, reason, last activity and size are its accessible description. A row being
   removed takes the `progress` wash and an inset hairline, and reads `removing…` in place of
   its meta, until the next report drops it.
