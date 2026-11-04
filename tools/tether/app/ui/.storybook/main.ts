@@ -1,33 +1,28 @@
 import type { StorybookConfig } from "@storybook/react-vite";
 import type { Plugin } from "vite";
 
-/** The one rule in each `src/theme.css` (tether's and the shared package's) that switches the tokens to dark. */
-const DARK_MEDIA = "@media (prefers-color-scheme: dark) {";
+/** Every rule that switches the tokens to dark: tether's own and the one the shared package's `theme.css` brings in. */
+const DARK_BLOCK = /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{(\s*):root\s*\{/g;
 
 /**
  * Storybook-only: `theme.css` picks dark or light from the system, which a story cannot set.
- * Rewrites its dark block to follow `<html data-theme="dark">` instead, which the toolbar's
- * Theme switch sets (`preview.tsx`). The app's own build never runs this plugin.
+ * Rewrites every dark block to follow `<html data-theme="dark">` instead, which the toolbar's
+ * Theme switch sets (`preview.tsx`). It runs after Tailwind has inlined the package's `theme.css`
+ * (a `pre` transform sees only the `@import`), so the package's tokens switch too.
+ * The app's own build never runs this plugin.
  */
 function themeByAttribute(): Plugin {
   return {
     name: "tether:theme-by-attribute",
-    enforce: "pre",
+    enforce: "post",
     transform(code, id) {
-      if (!id.endsWith("/src/theme.css")) return null;
-      const start = code.indexOf(DARK_MEDIA);
-      const root = code.indexOf(":root {", start);
-      if (start === -1 || root === -1) {
-        throw new Error(`theme.css has no "${DARK_MEDIA} :root {" block; update .storybook/main.ts`);
-      }
+      if (!id.split("?")[0].endsWith("/src/theme.css")) return null;
       // `:root[data-theme="dark"] { & { …tokens } }`: the same tokens, nested under the attribute.
-      return (
-        code.slice(0, start) +
-        ':root[data-theme="dark"] {' +
-        code.slice(start + DARK_MEDIA.length, root) +
-        "& {" +
-        code.slice(root + ":root {".length)
-      );
+      const rewritten = code.replace(DARK_BLOCK, (_match, space: string) => `:root[data-theme="dark"] {${space}& {`);
+      if (rewritten === code) {
+        throw new Error(`theme.css has no "@media (prefers-color-scheme: dark) { :root {" block; update .storybook/main.ts`);
+      }
+      return rewritten;
     },
   };
 }
