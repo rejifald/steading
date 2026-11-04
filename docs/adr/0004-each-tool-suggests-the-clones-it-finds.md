@@ -64,8 +64,9 @@ Constraints:
    its own rule:
 8. **tether** suggests a clone that has a remote. It is not suggested while concord is installed
    and it is concord's clone (that clone needs a `--gate`, which only `add` can take). The
-   suggestion carries the current branch if the remote has it, otherwise the remote's default
-   branch. *Add* lists it in `follow` mode with that branch. **A suggestion is never added as
+   suggestion carries the current branch if `refs/remotes/<remote>/<branch>` exists, otherwise
+   the branch `refs/remotes/<remote>/HEAD` points to. A clone with neither is not suggested. `add`
+   still confirms the branch with `ls-remote` when the operator accepts. *Add* lists it in `follow` mode with that branch. **A suggestion is never added as
    `mirror`**, because mirror throws away local work on every sync. A mirror still goes through
    *Add repository…*, with rule 8 of tether's ADR 0001.
 9. **reap** suggests a clone that has at least one linked worktree (an entry under
@@ -76,9 +77,12 @@ Constraints:
 
 10. **A scan runs only when the operator starts one.** That means *Find clones* in the popover, *Look
     again* later, or `git <tool> discover`. Nothing scans on start, on a timer or on popover
-    open, and there is no file watcher. The suggestions and the time of the last scan go into the
-    tool's `state.json`. Unanswered suggestions stay until they are answered, until the next scan
-    no longer finds them, or until they are listed some other way.
+    open, and there is no file watcher. The suggestions, what each root yielded, and the time of
+    the last scan go into a `discovery.json` beside the tool's `state.json`. `state.json` is a
+    flat map keyed by repo, and its loader treats a file it cannot parse as empty, so a new key
+    there would silently drop every record. A scan is local only: it reads remote-tracking refs
+    and runs no fetch or `ls-remote`. Unanswered suggestions stay until they are answered, until
+    the next scan no longer finds them, or until they are listed some other way.
 11. **The popover leads with the invitation, then the triage.** With nothing listed and no
     scan yet, the empty state offers *Find clones* beside *Add repository* and names the folders
     it will look in. Suggestions show as a *Found* section at the end of the list, each row with
@@ -117,7 +121,7 @@ status lines name this ADR once it is accepted.
   section for the first run and for later scans (2026-11-04).
 - **One list of suggestions or skips for both tools.** It couples the two configs that both
   tools' ADRs keep apart. Skipping a clone for tether says nothing about whether to sweep it.
-- **Skips in `state.json`.** They would be invisible and lost when state is reset. A skip is the
+- **Skips in `discovery.json` or `state.json`.** They would be invisible and lost when state is reset. A skip is the
   operator's decision, so it lives where their other decisions live.
 - **A notification per new clone.** It nags. Finding a clone is not urgent, and the tray icon
   stays reserved for states that need the operator.
