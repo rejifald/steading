@@ -135,8 +135,11 @@ impl Sandbox {
     }
 
     /// Points `origin` at GitHub, so reap asks `gh`; nothing is fetched after this.
+    /// git may not use https in the clone, so a sweep's `ls-remote` fails at once instead of
+    /// reaching GitHub.
     pub fn use_github_url(&self) {
         git(&self.clone, &["remote", "set-url", "origin", GITHUB_URL]);
+        git(&self.clone, &["config", "protocol.https.allow", "never"]);
     }
 
     /// Installs a fake `gh` that prints `json` for any command.
