@@ -230,11 +230,12 @@ fn describe(outcome: &Outcome, dry_run: bool) -> String {
     }
     for removed in &outcome.removed {
         if dry_run {
-            // A dry run never asks git about the branch, so it cannot say whether git keeps it.
-            let branch = removed
-                .branch
-                .as_ref()
-                .map_or_else(String::new, |branch| format!(", then its branch {branch}"));
+            // A dry run never asks git about the branch; it knows only that an unmerged one is kept.
+            let branch = match (&removed.branch, &removed.branch_kept) {
+                (Some(branch), Some(why)) => format!("; branch {branch} would be kept: {why}"),
+                (Some(branch), None) => format!(", then its branch {branch}"),
+                (None, _) => String::new(),
+            };
             lines.push(format!("  would remove {}{branch}", removed.path));
             if let Some(refname) = &removed.salvaged_to {
                 lines.push(format!(
@@ -355,6 +356,18 @@ mod tests {
         assert!(text.contains("would be saved to refs/reap/salvage/feat"));
         assert!(text.contains("would remove on confirm"));
         assert!(text.contains("would delete refs/reap/salvage/old"));
+    }
+
+    #[test]
+    fn a_dry_run_forecasts_an_unmerged_branch_as_kept() {
+        let mut outcome = acted();
+        outcome.removed[0].branch_kept = Some("not merged".into());
+        let text = describe(&outcome, true);
+
+        assert!(text.contains(
+            "would remove ~/Development/app-feat; branch feat would be kept: not merged"
+        ));
+        assert!(!text.contains("then its branch"));
     }
 
     #[test]

@@ -438,7 +438,12 @@ fn remove(
         return Ok(Ok(Removed {
             path: worktree.key.clone(),
             branch: worktree.branch.clone(),
-            branch_kept: None,
+            // Git is not asked in a dry run, but an unmerged branch is always kept (ADR 0003).
+            branch_kept: worktree
+                .branch
+                .as_ref()
+                .filter(|_| worktree.facts.merge.is_none())
+                .map(|_| "not merged".to_string()),
             salvaged_to,
         }));
     };
