@@ -206,13 +206,14 @@ fn sweep_command(
         print!("{}", describe(outcome, dry_run));
     }
     for pressure in &swept.volumes {
-        print!("{}", describe_pressure(pressure));
+        print!("{}", describe_pressure(pressure, dry_run));
     }
     Ok(())
 }
 
-/// What the pressure pass did about one volume, for the terminal; nothing for a healthy one.
-fn describe_pressure(pressure: &Pressure) -> String {
+/// What the pressure pass did about one volume, for the terminal; nothing for a healthy one. A dry
+/// run's `removed` holds what the pass would have removed, so its lines say `would`.
+fn describe_pressure(pressure: &Pressure, dry_run: bool) -> String {
     let volume = &pressure.volume;
     if !volume.is_low && pressure.removed.is_empty() && pressure.log.is_empty() {
         return String::new();
@@ -221,14 +222,16 @@ fn describe_pressure(pressure: &Pressure) -> String {
     lines.extend(pressure.log.iter().map(|line| format!("  {line}")));
     for reclaimed in &pressure.removed {
         lines.push(format!(
-            "  low disk: removed {} ({})",
+            "  low disk: {} {} ({})",
+            if dry_run { "would remove" } else { "removed" },
             reclaimed.removed.path,
             report::shown_size(reclaimed.bytes)
         ));
     }
     if !pressure.removed.is_empty() {
         lines.push(format!(
-            "  freed {} on {}",
+            "  {} {} on {}",
+            if dry_run { "would free" } else { "freed" },
             report::shown_size(pressure.freed_bytes),
             volume.name
         ));
@@ -429,6 +432,49 @@ mod tests {
         assert!(text.contains("removes on confirm"));
         assert!(text.contains("deleted refs/reap/salvage/old"));
         assert!(!text.contains("would"));
+    }
+
+    #[test]
+    fn a_dry_run_pressure_pass_says_would() {
+        let pressure = Pressure {
+            volume: crate::pressure::VolumeStatus {
+                name: "Backup".into(),
+                mount: "/Volumes/Backup".into(),
+                total_bytes: 1000,
+                available_bytes: 10,
+                threshold_bytes: Some(100),
+                is_low: true,
+                removable: 1,
+                holders: Vec::new(),
+            },
+            removed: vec![crate::pressure::Reclaimed {
+                repo: "~/Development/app".into(),
+                removed: sweep::Removed {
+                    path: "~/Development/app-feat".into(),
+                    branch: None,
+                    branch_kept: None,
+                    salvaged_to: None,
+                },
+                bytes: 500,
+            }],
+            freed_bytes: 400,
+            refused: Vec::new(),
+            skipped: Vec::new(),
+            asked: Vec::new(),
+            announce_asked: false,
+            announce_stuck: false,
+            log: Vec::new(),
+        };
+
+        let dry = describe_pressure(&pressure, true);
+        assert!(dry.contains("would remove ~/Development/app-feat"));
+        assert!(dry.contains("would free"));
+        assert!(!dry.contains("removed"));
+        assert!(!dry.contains("freed"));
+
+        let real = describe_pressure(&pressure, false);
+        assert!(real.contains("low disk: removed ~/Development/app-feat"));
+        assert!(real.contains("freed"));
     }
 
     #[test]
