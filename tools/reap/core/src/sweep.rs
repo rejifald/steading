@@ -5,7 +5,9 @@
 //! only when `gh` reports a merged pull request that contains the branch tip (rule 11, ADR
 //! 0002). A merged worktree with changes is removed with `--force` only once they are saved to a
 //! ref and checked (ADR dirty-merged-worktrees-are-salvaged). Nothing is pushed, no remote branch
-//! is deleted, and a main clone's checkout is never changed.
+//! is deleted, and a main clone's checkout is never changed. On a low volume, the pressure pass
+//! (ADR low-disk-skips-the-grace) removes removable worktrees without their grace, through the
+//! same guarded [`remove_checked`].
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -23,6 +25,7 @@ use crate::git;
 use crate::in_use::WorkingDirectories;
 use crate::lock;
 use crate::paths::{Paths, absolute, same_path};
+use crate::pressure::{self, Pressure};
 use crate::report::{self, Inspected, RepoReport};
 use crate::salvage::{self, Source};
 use crate::state_file::{self, Clock, Refusal, RepoMemory};
@@ -166,21 +169,31 @@ pub fn sweep(
         .collect())
 }
 
+/// What a sweep did: each repo's pass, then the pressure pass over the volumes (ADR
+/// low-disk-skips-the-grace).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct Swept {
+    pub repos: Vec<Outcome>,
+    /// Every volume that holds a listed repo's worktrees; empty with a repo selected.
+    pub volumes: Vec<Pressure>,
+}
+
 /// The tray's tick and `git reap sweep --due`: nothing while paused, else every repo whose last
-/// pass is older than the interval, skipping any another run holds.
+/// pass is older than the interval, skipping any another run holds. Then the pressure pass,
+/// which looks at every volume whether or not its repos were due.
 ///
 /// # Errors
 ///
 /// Fails when `repos.toml` cannot be read.
-pub fn sweep_due(ctx: &Ctx, now: DateTime<Utc>) -> Result<Vec<Outcome>> {
+pub fn sweep_due(ctx: &Ctx, now: DateTime<Utc>) -> Result<Swept> {
     if ctx.paths.is_paused() {
-        return Ok(Vec::new());
+        return Ok(Swept::default());
     }
     let config = Config::load(&ctx.paths)?;
     let interval = chrono::Duration::from_std(config.interval()?).unwrap_or(chrono::Duration::MAX);
     let memories = state_file::load(&ctx.paths);
-    Ok(config
-        .repos(&ctx.paths)?
+    let repos = config.repos(&ctx.paths)?;
+    let outcomes = repos
         .iter()
         .filter(|repo| {
             let last_pass = memories
@@ -189,7 +202,48 @@ pub fn sweep_due(ctx: &Ctx, now: DateTime<Utc>) -> Result<Vec<Outcome>> {
             last_pass.is_none_or(|last| now >= last + interval)
         })
         .map(|repo| sweep_repo(ctx, repo, Duration::ZERO, now))
-        .collect())
+        .collect();
+    under_pressure(ctx, &repos, outcomes, now)
+}
+
+/// A pass over every listed repo, as [`sweep`] with no selector, then the pressure pass.
+///
+/// # Errors
+///
+/// Fails when `repos.toml` cannot be read.
+pub fn sweep_all(ctx: &Ctx, wait: Duration, now: DateTime<Utc>) -> Result<Swept> {
+    let outcomes = sweep(ctx, None, wait, now)?;
+    let repos = Config::load(&ctx.paths)?.repos(&ctx.paths)?;
+    under_pressure(ctx, &repos, outcomes, now)
+}
+
+/// Runs the pressure pass after the repos' own passes and brings the reports of the repos it
+/// removed from up to date.
+fn under_pressure(
+    ctx: &Ctx,
+    repos: &[Repo],
+    mut outcomes: Vec<Outcome>,
+    now: DateTime<Utc>,
+) -> Result<Swept> {
+    let volumes = pressure::pass(ctx, repos, now)?;
+    for repo in repos {
+        let key = ctx.paths.tilde(&repo.path);
+        let has_removed = volumes.iter().any(|volume| volume.removed_from(&key));
+        let Some(outcome) = outcomes.iter_mut().find(|outcome| outcome.repo == key) else {
+            continue;
+        };
+        if has_removed
+            && !ctx.dry_run
+            && let Ok(mut report) = read_only(&ctx.paths, repo, now)
+        {
+            report::measure(&ctx.paths, &mut report);
+            outcome.report = report;
+        }
+    }
+    Ok(Swept {
+        repos: outcomes,
+        volumes,
+    })
 }
 
 /// One pass over one repo. A repo that cannot be read or is busy comes back with its reason; it
@@ -337,7 +391,7 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
 }
 
 /// The repo's report without acting, for a busy repo.
-fn read_only(paths: &Paths, repo: &Repo, now: DateTime<Utc>) -> Result<RepoReport> {
+pub(crate) fn read_only(paths: &Paths, repo: &Repo, now: DateTime<Utc>) -> Result<RepoReport> {
     let prepared = report::prepare(paths, repo)?;
     let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
     let memory = state_file::load(paths)
@@ -438,7 +492,12 @@ fn remove(
         return Ok(Ok(Removed {
             path: worktree.key.clone(),
             branch: worktree.branch.clone(),
-            branch_kept: None,
+            // Git is not asked in a dry run, but an unmerged branch is always kept (ADR 0003).
+            branch_kept: worktree
+                .branch
+                .as_ref()
+                .filter(|_| worktree.facts.merge.is_none())
+                .map(|_| "not merged".to_string()),
             salvaged_to,
         }));
     };
@@ -546,17 +605,53 @@ pub fn remove_now(ctx: &Ctx, selector: &str, now: DateTime<Utc>) -> Result<Remov
     let paths = &ctx.paths;
     let (repo, path) = locate(paths, selector)?;
     let key = paths.tilde(&path);
+    // A refusal is retried on request.
+    match remove_checked(ctx, &repo, &key, Duration::from_secs(10), true, now)? {
+        Attempt::Removed(removed) => Ok(removed),
+        Attempt::Refused(message) => bail!("git refused to remove {key}: {message}"),
+        Attempt::NotRemovable(reason) => bail!("{key} is not removable: {reason}"),
+        Attempt::Busy(why) => bail!("{} is busy: {why}", paths.tilde(&repo.path)),
+    }
+}
+
+/// What an attempt to remove one worktree came to.
+pub(crate) enum Attempt {
+    Removed(Removed),
+    /// Git refused, or saving its changes failed.
+    Refused(String),
+    /// Not removable at this moment, with the reason `status` would give.
+    NotRemovable(String),
+    /// Another writer holds the repo.
+    Busy(String),
+}
+
+/// Removes one worktree under its repo's lock, judging it afresh first: the guards of rules 3
+/// to 6 and 11 run again whatever was decided before the lock was taken. The clock and any
+/// refusal are updated in `state.json`, unless this is a dry run. With `retry_refusal` a
+/// refusal recorded for the worktree is dropped first, so it is judged again.
+pub(crate) fn remove_checked(
+    ctx: &Ctx,
+    repo: &Repo,
+    key: &str,
+    wait: Duration,
+    retry_refusal: bool,
+    now: DateTime<Utc>,
+) -> Result<Attempt> {
+    let paths = &ctx.paths;
     let common_dir = git::path_of(&paths.git, &repo.path, &["rev-parse", "--git-common-dir"])?;
-    let _lock = lock::acquire(&common_dir, Duration::from_secs(10))?
-        .map_err(|why| anyhow::anyhow!("{} is busy: {why}", paths.tilde(&repo.path)))?;
-    let prepared = report::prepare(paths, &repo)?;
+    let _lock = match lock::acquire(&common_dir, wait)? {
+        Ok(lock) => lock,
+        Err(why) => return Ok(Attempt::Busy(why)),
+    };
+    let prepared = report::prepare(paths, repo)?;
     let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
     let mut memory = state_file::load(paths)
         .remove(&paths.tilde(&repo.path))
         .unwrap_or_default();
-    // A refusal is retried on request: drop it so the worktree is judged afresh.
-    memory.refusals.remove(&key);
-    let inspection = report::inspect(paths, &repo, &prepared, &directories, &memory, now)?;
+    if retry_refusal {
+        memory.refusals.remove(key);
+    }
+    let inspection = report::inspect(paths, repo, &prepared, &directories, &memory, now)?;
     let (worktree, row) = inspection
         .worktrees
         .iter()
@@ -564,19 +659,19 @@ pub fn remove_now(ctx: &Ctx, selector: &str, now: DateTime<Utc>) -> Result<Remov
         .find(|(worktree, _)| worktree.key == key)
         .context("the worktree disappeared while reap looked at it")?;
     if worktree.state != State::Removable {
-        bail!("{key} is not removable: {}", row.reason);
+        return Ok(Attempt::NotRemovable(row.reason.clone()));
     }
-    let removed = remove(ctx, &repo, worktree, now)?;
+    let removed = remove(ctx, repo, worktree, now)?;
     if !ctx.dry_run {
         state_file::update(paths, &paths.tilde(&repo.path), |memory| {
-            memory.clocks.remove(&key);
+            memory.clocks.remove(key);
             match &removed {
                 Ok(_) => {
-                    memory.refusals.remove(&key);
+                    memory.refusals.remove(key);
                 }
                 Err(message) => {
                     memory.refusals.insert(
-                        key.clone(),
+                        key.to_string(),
                         Refusal {
                             head: worktree.head.clone().unwrap_or_default(),
                             message: message.clone(),
@@ -586,7 +681,10 @@ pub fn remove_now(ctx: &Ctx, selector: &str, now: DateTime<Utc>) -> Result<Remov
             }
         })?;
     }
-    removed.map_err(|message| anyhow::anyhow!("git refused to remove {key}: {message}"))
+    Ok(match removed {
+        Ok(removed) => Attempt::Removed(removed),
+        Err(message) => Attempt::Refused(message),
+    })
 }
 
 #[cfg(test)]

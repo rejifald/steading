@@ -1,4 +1,5 @@
-//! `repos.toml` (rules 1, 7, 10, 13 and ADR dirty-merged-worktrees-are-salvaged): one `[[repo]]`
+//! `repos.toml` (rules 1, 7, 10, 13 and ADRs dirty-merged-worktrees-are-salvaged and
+//! low-disk-skips-the-grace): one `[[repo]]`
 //! per main clone, with the sweep settings globally and per repo. Nothing in a clone that is not
 //! listed is ever touched. `scan` and `skip` are discovery's (repo ADR 0004) and never widen that:
 //! a found clone is listed only through `add`.
@@ -13,6 +14,7 @@
 //! salvage_max_age = "30d"
 //! scan = ["~/Development"]            # where `git reap discover` looks; absent: the usual folders, [] = off
 //! skip = ["~/Development/scratch"]    # clones discovery no longer suggests
+//! low_disk = "10%"      # or a size ("20GB"), or "off": below this, removable worktrees go at once
 //!
 //! [[repo]]
 //! path = "~/Development/app"
@@ -38,6 +40,7 @@ pub const DEFAULT_STALE_AFTER: Duration = Duration::from_secs(14 * 24 * 3600);
 pub const DEFAULT_DIRTY_GRACE: Duration = Duration::from_secs(7 * 24 * 3600);
 pub const DEFAULT_SALVAGE_MAX_UNTRACKED: u64 = 100_000_000;
 pub const DEFAULT_SALVAGE_MAX_AGE: Duration = Duration::from_secs(30 * 24 * 3600);
+pub const DEFAULT_LOW_DISK: LowDisk = LowDisk::Percent(10);
 
 /// What reap does with a removable worktree (rule 10).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -59,6 +62,85 @@ impl Policy {
             Self::Auto => "auto",
             Self::Ask => "ask",
             Self::Off => "off",
+        }
+    }
+}
+
+/// When a volume counts as low (ADR low-disk-skips-the-grace): the free space below which a
+/// removable worktree goes without waiting out its grace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LowDisk {
+    /// Free space below this share of the volume, in whole percent (1 to 50).
+    Percent(u8),
+    /// Free space below this many bytes.
+    Size(u64),
+    /// Never low: the grace always applies.
+    Off,
+}
+
+impl LowDisk {
+    /// `10%`, a size such as `20GB`, or `off`.
+    ///
+    /// # Errors
+    ///
+    /// Fails on any other form, on a percentage outside 1 to 50, and on a zero size.
+    pub fn parse(text: &str) -> Result<Self> {
+        let text = text.trim();
+        if text.eq_ignore_ascii_case("off") {
+            return Ok(Self::Off);
+        }
+        let form = || {
+            format!(
+                "{text:?}: expected a percentage such as \"10%\", a size such as \"20GB\", or \"off\""
+            )
+        };
+        if let Some(number) = text.strip_suffix('%') {
+            let percent: u8 = number.trim().parse().with_context(form)?;
+            if !(1..=50).contains(&percent) {
+                bail!("{text:?}: a percentage must be from 1% to 50%");
+            }
+            return Ok(Self::Percent(percent));
+        }
+        match parse_size(text).with_context(form)? {
+            0 => bail!("{text:?}: a size must be more than 0; use \"off\" to turn it off"),
+            bytes => Ok(Self::Size(bytes)),
+        }
+    }
+
+    /// The free space, in bytes, below which a volume of `total` bytes is low; `None` when off.
+    #[must_use]
+    pub fn threshold(self, total: u64) -> Option<u64> {
+        match self {
+            Self::Percent(percent) => {
+                let bytes = u128::from(total) * u128::from(percent) / 100;
+                Some(u64::try_from(bytes).unwrap_or(u64::MAX))
+            }
+            Self::Size(bytes) => Some(bytes),
+            Self::Off => None,
+        }
+    }
+
+    /// The free space at which a pressure pass stops: 1.5 times [`LowDisk::threshold`].
+    #[must_use]
+    pub fn healthy_at(self, total: u64) -> Option<u64> {
+        self.threshold(total)
+            .map(|threshold| threshold.saturating_add(threshold / 2))
+    }
+
+    /// Whether `available` bytes free is low on a volume of `total` bytes.
+    #[must_use]
+    pub fn is_low(self, available: u64, total: u64) -> bool {
+        self.threshold(total)
+            .is_some_and(|threshold| available < threshold)
+    }
+
+    /// As written in `repos.toml`, for messages.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Percent(percent) => format!("{percent}%"),
+            Self::Size(bytes) => crate::report::shown_size(bytes),
+            Self::Off => "off".into(),
         }
     }
 }
@@ -85,6 +167,8 @@ pub struct RepoEntry {
     pub salvage_max_untracked: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub salvage_max_age: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_disk: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -112,6 +196,8 @@ pub struct Config {
     /// Clones discovery does not suggest (rule 3), as written.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skip: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_disk: Option<String>,
     #[serde(default)]
     pub repo: Vec<RepoEntry>,
 }
@@ -133,6 +219,8 @@ pub struct Repo {
     pub salvage_max_untracked: u64,
     /// How long a salvage ref is kept before a sweep deletes it.
     pub salvage_max_age: Duration,
+    /// When a volume holding this repo's worktrees counts as low.
+    pub low_disk: LowDisk,
 }
 
 impl Repo {
@@ -389,6 +477,13 @@ impl Config {
                 &self.salvage_max_age,
                 DEFAULT_SALVAGE_MAX_AGE,
             )?,
+            low_disk: entry
+                .low_disk
+                .as_ref()
+                .or(self.low_disk.as_ref())
+                .map_or(Ok(DEFAULT_LOW_DISK), |text| {
+                    LowDisk::parse(text).context("low_disk")
+                })?,
         })
     }
 }
@@ -482,12 +577,72 @@ mod tests {
     }
 
     #[test]
+    fn low_disk_is_a_percentage_a_size_or_off() {
+        assert_eq!(LowDisk::parse("10%").unwrap(), LowDisk::Percent(10));
+        assert_eq!(LowDisk::parse(" 5 % ").unwrap(), LowDisk::Percent(5));
+        assert_eq!(
+            LowDisk::parse("20GB").unwrap(),
+            LowDisk::Size(20_000_000_000)
+        );
+        assert_eq!(LowDisk::parse("OFF").unwrap(), LowDisk::Off);
+        for bad in [
+            "", "%", "0%", "51%", "10.5%", "-5%", "lots", "20TB", "0", "0GB",
+        ] {
+            assert!(LowDisk::parse(bad).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn low_disk_levels_follow_the_volume_size() {
+        let total = 1_000_000_000_000;
+
+        assert_eq!(LowDisk::Percent(10).threshold(total), Some(100_000_000_000));
+        assert_eq!(
+            LowDisk::Percent(10).healthy_at(total),
+            Some(150_000_000_000)
+        );
+        assert_eq!(
+            LowDisk::Size(20_000_000_000).threshold(total),
+            Some(20_000_000_000)
+        );
+        assert_eq!(LowDisk::Off.threshold(total), None);
+        assert!(LowDisk::Percent(10).is_low(99_999_999_999, total));
+        assert!(!LowDisk::Percent(10).is_low(100_000_000_000, total));
+        assert!(!LowDisk::Off.is_low(0, total));
+    }
+
+    #[test]
+    fn low_disk_is_read_globally_and_per_repo_and_defaults_to_ten_percent() {
+        let paths = Paths::new(Path::new("/Users/me"), Path::new("/c"));
+        let config: Config = toml::from_str(
+            "low_disk = \"15%\"\n\n\
+             [[repo]]\npath = \"/a\"\n\n\
+             [[repo]]\npath = \"/b\"\nlow_disk = \"off\"\n\n\
+             [[repo]]\npath = \"/c\"\nlow_disk = \"20GB\"\n",
+        )
+        .unwrap();
+        let defaults: Config = toml::from_str("[[repo]]\npath = \"/a\"\n").unwrap();
+
+        let repos = config.repos(&paths).unwrap();
+
+        assert_eq!(repos[0].low_disk, LowDisk::Percent(15));
+        assert_eq!(repos[1].low_disk, LowDisk::Off);
+        assert_eq!(repos[2].low_disk, LowDisk::Size(20_000_000_000));
+        assert_eq!(
+            defaults.repos(&paths).unwrap()[0].low_disk,
+            DEFAULT_LOW_DISK
+        );
+    }
+
+    #[test]
     fn a_bad_entry_fails_the_whole_file() {
         let paths = Paths::new(Path::new("/h"), Path::new("/c"));
         for bad in [
             "[[repo]]\npath = \"relative\"\n",
             "[[repo]]\npath = \"/a\"\ngrace = \"soon\"\n",
             "[[repo]]\npath = \"/a\"\nsalvage_max_untracked = \"lots\"\n",
+            "[[repo]]\npath = \"/a\"\nlow_disk = \"soon\"\n",
+            "low_disk = \"99%\"\n[[repo]]\npath = \"/a\"\n",
             "interval = \"10s\"\n[[repo]]\npath = \"/a\"\n",
             "[[repo]]\npath = \"/a\"\n[[repo]]\npath = \"/a\"\n",
         ] {

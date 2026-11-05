@@ -107,8 +107,12 @@ The same checks run in the git hooks (`lefthook.yml`) and in CI (`.github/workfl
 13). Three more settings, also global and per repo, govern merged worktrees with uncommitted
 changes: `dirty_grace` (default `7d`, how long nothing in it may change before its changes are
 saved), `salvage_max_untracked` (default `100MB`, the most untracked data a save copies) and
-`salvage_max_age` (default `30d`, when a sweep deletes a save). `~/.config/reap/state.json`
-holds the grace clocks, *Keep*s and refused removals; a *Pause* file lives beside both.
+`salvage_max_age` (default `30d`, when a sweep deletes a save). `low_disk` (default `10%`, or a
+size such as `20GB`, or `off`; global and per repo) is the free space below which a volume is
+low and its removable worktrees go largest first without waiting out their grace, until it has
+1.5 times that free ([ADR low-disk-skips-the-grace](docs/adr/0005-low-disk-skips-the-grace.md)).
+`~/.config/reap/state.json` holds the grace clocks, *Keep*s and refused removals, and the
+low-disk episodes already announced; a *Pause* file lives beside both.
 
 `git reap discover [--json]` looks in the folders of `scan` (default: whichever of `~/Development`,
 `~/Code`, `~/Projects`, `~/src`, `~/dev` and `~/work` exist; `scan = []` turns it off) and prints

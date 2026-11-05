@@ -2448,6 +2448,7 @@ dependencies = [
  "chrono",
  "clap",
  "find-clones",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
