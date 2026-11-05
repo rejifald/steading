@@ -14,10 +14,12 @@ pub mod github;
 pub mod in_use;
 pub mod lock;
 pub mod paths;
+pub mod pressure;
 pub mod report;
 pub mod salvage;
 pub mod state_file;
 pub mod sweep;
+pub mod volume;
 pub mod worktree_list;
 
 pub use paths::Paths;

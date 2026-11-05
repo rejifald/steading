@@ -367,10 +367,10 @@ fn a_due_sweep_respects_pause_and_the_interval() {
     sandbox.list_clone();
     let ctx = Ctx::new(sandbox.paths.clone(), false);
 
-    let first = sweep::sweep_due(&ctx, Utc::now()).unwrap();
-    let too_soon = sweep::sweep_due(&ctx, later(0)).unwrap();
+    let first = sweep::sweep_due(&ctx, Utc::now()).unwrap().repos;
+    let too_soon = sweep::sweep_due(&ctx, later(0)).unwrap().repos;
     sandbox.paths.set_paused(true).unwrap();
-    let paused = sweep::sweep_due(&ctx, later(1)).unwrap();
+    let paused = sweep::sweep_due(&ctx, later(1)).unwrap().repos;
 
     assert_eq!(first.len(), 1);
     assert!(too_soon.is_empty());

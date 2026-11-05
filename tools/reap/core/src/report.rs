@@ -18,8 +18,10 @@ use crate::git;
 use crate::github::{self, PullRequest, PullRequestState, PullRequests};
 use crate::in_use::WorkingDirectories;
 use crate::paths::Paths;
+use crate::pressure::{self, VolumeStatus};
 use crate::salvage::{self, Salvaged};
 use crate::state_file::{self, RepoMemory};
+use crate::volume::{self, ReadVolume};
 use crate::worktree_list::{self, Worktree};
 
 /// Files in a worktree's git dir that mean an operation is under way (rule 4).
@@ -120,9 +122,11 @@ pub struct Report {
     pub overall: Overall,
     /// Removable worktrees and missing entries waiting for a prune.
     pub removable: usize,
-    /// Stale worktrees and repos that cannot be read.
+    /// Stale worktrees, repos that cannot be read, and low volumes reap can free nothing on.
     pub needs_you: usize,
     pub repos: Vec<RepoReport>,
+    /// Every volume that holds a listed repo's worktrees (ADR low-disk-skips-the-grace).
+    pub volumes: Vec<VolumeStatus>,
 }
 
 /// Builds the report for every listed repo. Read-only: the grace clocks and *Keep*s come from
@@ -133,10 +137,19 @@ pub struct Report {
 /// Fails when `repos.toml` cannot be read; a repo that cannot be read only fills its own
 /// `error`.
 pub fn report(paths: &Paths, now: DateTime<Utc>) -> Result<Report> {
+    report_with(paths, &volume::read, now)
+}
+
+/// [`report`] with `read_volume` reading the free space, so a test can fake a low volume.
+///
+/// # Errors
+///
+/// Fails when `repos.toml` cannot be read.
+pub fn report_with(paths: &Paths, read_volume: &ReadVolume, now: DateTime<Utc>) -> Result<Report> {
     let repos = Config::load(paths)?.repos(paths)?;
     let memories = state_file::load(paths);
     let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
-    let reports = repos
+    let reports: Vec<RepoReport> = repos
         .iter()
         .map(|repo| {
             let memory = memories
@@ -155,12 +168,13 @@ pub fn report(paths: &Paths, now: DateTime<Utc>) -> Result<Report> {
                 )
         })
         .collect();
-    Ok(summarize(paths, reports))
+    let volumes = pressure::statuses(paths, read_volume, &repos, &reports);
+    Ok(summarize(paths, reports, volumes))
 }
 
-/// The totals and overall state of a set of repo reports.
+/// The totals and overall state of a set of repo reports and the volumes they sit on.
 #[must_use]
-pub fn summarize(paths: &Paths, repos: Vec<RepoReport>) -> Report {
+pub fn summarize(paths: &Paths, repos: Vec<RepoReport>, volumes: Vec<VolumeStatus>) -> Report {
     let rows = || repos.iter().flat_map(|repo| &repo.worktrees);
     let removable = rows()
         .filter(|row| matches!(row.state, State::Removable | State::Missing))
@@ -168,7 +182,11 @@ pub fn summarize(paths: &Paths, repos: Vec<RepoReport>) -> Report {
     let needs_you = rows()
         .filter(|row| matches!(row.state, State::Stale | State::Refused))
         .count()
-        + repos.iter().filter(|repo| repo.error.is_some()).count();
+        + repos.iter().filter(|repo| repo.error.is_some()).count()
+        + volumes
+            .iter()
+            .filter(|volume| volume.is_low && volume.removable == 0)
+            .count();
     let overall = match (needs_you, removable) {
         (0, 0) => Overall::Tidy,
         (0, _) => Overall::Pending,
@@ -180,6 +198,7 @@ pub fn summarize(paths: &Paths, repos: Vec<RepoReport>) -> Report {
         removable,
         needs_you,
         repos,
+        volumes,
     }
 }
 
@@ -403,7 +422,7 @@ pub(crate) fn shown(refname: &str) -> String {
         .to_string()
 }
 
-fn list_worktrees(paths: &Paths, repo: &Path) -> Result<Vec<Worktree>> {
+pub(crate) fn list_worktrees(paths: &Paths, repo: &Path) -> Result<Vec<Worktree>> {
     let output = git::run(&paths.git, repo, &["worktree", "list", "--porcelain", "-z"])?;
     // `run` trims the trailing newline only; the NUL terminators survive.
     Ok(worktree_list::parse(&output)?)
@@ -685,6 +704,11 @@ pub fn render(report: &Report) -> String {
     if let Some(sizes) = sizes_line(report) {
         let _ = writeln!(out, "  {sizes}");
     }
+    for volume in &report.volumes {
+        for line in describe_volume(volume) {
+            let _ = writeln!(out, "  {line}");
+        }
+    }
     if report.repos.is_empty() {
         out.push_str("  no repos listed; add a main clone with `git reap add <path>`\n");
     }
@@ -742,6 +766,35 @@ pub fn render(report: &Report) -> String {
         }
     }
     out
+}
+
+/// A volume's free space against its threshold, then, while it is low, what holds the space.
+#[must_use]
+pub fn describe_volume(volume: &VolumeStatus) -> Vec<String> {
+    let level = match (volume.is_low, volume.threshold_bytes) {
+        (true, Some(threshold)) => format!(", LOW (below {})", shown_size(threshold)),
+        (false, Some(threshold)) => format!(" (low below {})", shown_size(threshold)),
+        (_, None) => " (low_disk off)".to_string(),
+    };
+    let mut lines = vec![format!(
+        "{}: {} free of {}{level}",
+        volume.name,
+        shown_size(volume.available_bytes),
+        shown_size(volume.total_bytes)
+    )];
+    if volume.is_low {
+        if volume.removable == 0 {
+            lines.push("  nothing reap can remove by itself here".into());
+        }
+        lines.extend(volume.holders.iter().map(|holder| {
+            let size = holder
+                .bytes
+                .map(|bytes| format!(" {}", shown_size(bytes)))
+                .unwrap_or_default();
+            format!("  holds space: {}{size} ({})", holder.path, holder.why)
+        }));
+    }
+    lines
 }
 
 /// "worktrees take 14 GB: 3.2 GB removable, 1.1 GB held by uncommitted changes", leaving out
