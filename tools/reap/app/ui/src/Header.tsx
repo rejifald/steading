@@ -9,13 +9,21 @@ interface HeaderProps {
   title?: string;
   /** False in the add view, which shows the title alone. */
   showState?: boolean;
-  /** Draws the progress hairline on the bottom edge: a refresh, a removal or an add. */
+  /** Draws the progress hairline on the bottom edge: a refresh, a removal, an add or a scan. */
   isPending?: boolean;
+  /** With nothing listed, the suggestions Found holds, as "N found"; `null` says nothing. */
+  foundCount?: number | null;
 }
 
-/** The title, the overall state as a glyph and a word, and a quiet summary with the disk taken on the right. */
-export function Header({ snapshot, title = "reap", showState = true, isPending = false }: HeaderProps) {
-  const rightSlot = showState ? summaryOf(snapshot) : null;
+/** The title, the overall state as a glyph and a word, and a quiet summary with the disk taken on the right ("N found" while nothing is listed). */
+export function Header({
+  snapshot,
+  title = "reap",
+  showState = true,
+  isPending = false,
+  foundCount = null,
+}: HeaderProps) {
+  const rightSlot = (showState ? summaryOf(snapshot) : null) ?? (foundCount === null ? null : `${foundCount} found`);
   return (
     <PopoverHeader
       title={title}

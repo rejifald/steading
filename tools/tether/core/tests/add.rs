@@ -168,11 +168,10 @@ fn add_writes_the_entry_and_remove_unlists_it() {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        !fs::read_to_string(s.config.join("repos.toml"))
-            .unwrap()
-            .contains("notes")
-    );
+    // Unlisted, and kept out of the suggestions (ADR 0004 rule 3).
+    let toml = fs::read_to_string(s.config.join("repos.toml")).unwrap();
+    assert!(!toml.contains("\n[[repo]]"), "{toml}");
+    assert!(toml.contains("skip = [\"~/Development/notes\"]"), "{toml}");
     assert!(
         !fs::read_to_string(s.config.join("state.json"))
             .unwrap()

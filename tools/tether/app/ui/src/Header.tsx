@@ -10,6 +10,8 @@ interface HeaderProps {
   title?: string;
   /** False in the add view and the empty list, which show the title alone. */
   showState?: boolean;
+  /** With the state hidden (nothing listed), still say "N found" on the right. */
+  showFound?: boolean;
   /** In a repo's settings: that repo's state on the right, as its row shows it. */
   repo?: Row;
   /** Draws the progress hairline on the bottom edge: a sync, an add, a save or a removal. */
@@ -17,8 +19,16 @@ interface HeaderProps {
 }
 
 /** The title, the overall state as a glyph and a word, and a quiet summary on the right. */
-export function Header({ snapshot, now, title = "tether", showState = true, repo, isPending = false }: HeaderProps) {
-  const rightSlot = showState ? summaryOf(snapshot, now) : null;
+export function Header({
+  snapshot,
+  now,
+  title = "tether",
+  showState = true,
+  showFound = false,
+  repo,
+  isPending = false,
+}: HeaderProps) {
+  const rightSlot = showState || showFound ? summaryOf(snapshot, now) : null;
   const aside = repo ? (
     <span className="text-sm">
       <StateLabel tone="header" health={repo.health} behind={repo.behind} />
@@ -40,8 +50,12 @@ function summaryOf(snapshot: Snapshot | null, now: Date): string | null {
   const report = snapshot?.report ?? null;
   if (!snapshot || !report) return null;
   const { repos } = report;
+  if (repos.length === 0) {
+    // Nothing listed: the clones a scan found are what there is to count.
+    const { suggestions, scanning } = snapshot.discovery;
+    return suggestions.length > 0 || scanning !== null ? `${suggestions.length} found` : null;
+  }
   if (snapshot.syncing) return `${snapshot.busy.length} of ${repos.length}`;
-  if (repos.length === 0) return null;
   if (report.paused || repos.some((row) => row.health !== "in-sync")) {
     return `${repos.length} ${repos.length === 1 ? "repo" : "repos"}`;
   }

@@ -19,6 +19,7 @@ path = "src/bin/git-tether.rs"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4", features = ["derive"] }
+find-clones = { path = "../../../crates/find-clones" }
 # killpg: a gate that times out is killed with everything it started.
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

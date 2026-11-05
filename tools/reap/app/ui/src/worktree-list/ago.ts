@@ -23,3 +23,10 @@ export function inTime(rfc3339: string, now: Date): string {
   if (seconds < DAY) return `in ${Math.floor(seconds / HOUR)} h`;
   return `in ${Math.floor(seconds / DAY)} d`;
 }
+
+/** When a scan finished, as Found words it: "just now", "3 min ago", "2 h ago", "3 days ago". */
+export function lookedAgo(rfc3339: string | null, now: Date): string {
+  const days = rfc3339 ? Math.floor((now.getTime() - Date.parse(rfc3339)) / 1000 / DAY) : 0;
+  if (days >= 1) return `${days} ${days === 1 ? "day" : "days"} ago`;
+  return ago(rfc3339 ?? undefined, now);
+}

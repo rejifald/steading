@@ -831,6 +831,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "find-clones"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2437,6 +2447,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "find-clones",
  "libc",
  "serde",
  "serde_json",
@@ -3349,6 +3360,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "find-clones",
  "serde",
  "tauri",
  "tauri-build",
@@ -3362,6 +3374,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "find-clones",
  "libc",
  "serde",
  "serde_json",

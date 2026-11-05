@@ -35,6 +35,48 @@ export interface Report {
   repos: Row[];
 }
 
+/** One folder a scan walks, joined with what the last scan found in it (`discovery::RootInfo`). */
+export interface RootInfo {
+  /** As configured, with `~`. */
+  path: string;
+  /** Main clones the walk found there; `null` when the last scan did not cover it. */
+  clones: number | null;
+  /** The walk hit its folder or time cap before it had seen every folder. */
+  stopped_early: boolean;
+  /** Why the folder could not be read; `null` when it could. */
+  error: string | null;
+}
+
+/** A clone the operator skipped, listed in *Where to look* so it can be unskipped. */
+export interface SkippedClone {
+  path: string;
+  name: string;
+  /** The longest scan root the path lies under; `null` when none does. */
+  root: string | null;
+}
+
+/** A clone a scan found that tether would keep on a branch (`discovery::Suggestion`). */
+export interface Suggestion {
+  /** As it would be listed, with `~`. The key every discovery command takes. */
+  path: string;
+  name: string;
+  /** The scan root it was found under, with `~`. */
+  root: string;
+  /** The branch *Add* would follow. */
+  branch: string;
+}
+
+/** What `discovery.json` holds, minus the clones already listed or skipped (`discovery::View`). */
+export interface Discovery {
+  /** When the last scan ended; `null` before any scan, or while the first one runs. */
+  scanned_at: string | null;
+  /** The root being walked right now; `null` when no scan runs. */
+  scanning: string | null;
+  roots: RootInfo[];
+  suggestions: Suggestion[];
+  skipped: SkippedClone[];
+}
+
 /** What the app sends with every refresh: the report and what only the tray knows. */
 export interface Snapshot {
   /** `null` before the first report, or when repos.toml cannot be read (see `error`). */
@@ -47,6 +89,8 @@ export interface Snapshot {
   note: string | null;
   /** Per path, the CLI's own detail line: the skip reason or the commits to pull. */
   details: Record<string, string>;
+  /** The clones the last scan found, and where it looks (ADR 0004). */
+  discovery: Discovery;
 }
 
 export interface AddRequest {
@@ -81,6 +125,17 @@ export interface TetherApi {
   /** Unlists a repo; its clone is left as it is. */
   remove(path: string): Promise<void>;
   openInFinder(path: string): Promise<void>;
+  /** Starts a scan of the scan roots and returns at once; the results arrive with the refreshes. */
+  findClones(): Promise<void>;
+  /** Lists a suggestion as *follow* on its branch. Rejects with `add`'s own error text. */
+  addSuggestion(path: string): Promise<void>;
+  /** Hides a clone from the suggestions until it is unskipped. */
+  skipClone(path: string): Promise<void>;
+  unskipClone(path: string): Promise<void>;
+  /** Adds a folder to the scan roots; nothing is scanned until *Look again*. */
+  addScanRoot(path: string): Promise<void>;
+  /** Drops a folder from the scan roots, and its suggestions with it. */
+  removeScanRoot(path: string): Promise<void>;
   hide(): Promise<void>;
   quit(): Promise<void>;
 }
@@ -99,6 +154,12 @@ export const tauriApi: TetherApi = {
   setInterval: (path, interval) => invoke("set_interval", { path, interval }),
   remove: (path) => invoke("remove", { path }),
   openInFinder: (path) => invoke("open_in_finder", { path }),
+  findClones: () => invoke("find_clones"),
+  addSuggestion: (path) => invoke("add_suggestion", { path }),
+  skipClone: (path) => invoke("skip_clone", { path }),
+  unskipClone: (path) => invoke("unskip_clone", { path }),
+  addScanRoot: (path) => invoke("add_scan_root", { path }),
+  removeScanRoot: (path) => invoke("remove_scan_root", { path }),
   hide: () => invoke("hide"),
   quit: () => invoke("quit"),
 };

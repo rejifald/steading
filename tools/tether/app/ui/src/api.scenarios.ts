@@ -1,5 +1,5 @@
-import type { Row } from "./api";
-import { minutesAgo, row, type FakeOptions } from "./api.fake";
+import type { Discovery, RootInfo, Row, Suggestion } from "./api";
+import { minutesAgo, row, suggestion, type FakeOptions } from "./api.fake";
 
 /**
  * The popover's states as drawn in `docs/design/popover/reference/`, for `npm run dev`:
@@ -119,7 +119,119 @@ const longNames: Row[] = [
 
 const allInSync = regular.map((r) => ({ ...r, health: "in-sync" as const, last_sync: minutesAgo(2, now) }));
 
+/* Clone discovery (ADR 0004), `docs/design/discovery/reference/`: one entry per panel and edge. */
+
+const DEV = "~/Development";
+const CODE = "~/Code";
+
+const root = (path: string, clones: number | null, fields: Partial<RootInfo> = {}): RootInfo => ({
+  path,
+  clones,
+  stopped_early: false,
+  error: null,
+  ...fields,
+});
+
+const cache = suggestion("cache");
+const queue = suggestion("queue");
+const search = suggestion("search", DEV, "develop");
+const gateway = suggestion("gateway");
+const notes = suggestion("notes", CODE);
+const wiki = suggestion("wiki", CODE);
+const six: Suggestion[] = [cache, queue, search, gateway, notes, wiki];
+
+/** A finished scan of the two default roots. */
+const scanned = (suggestions: Suggestion[], minutes = 0, roots?: RootInfo[]): Partial<Discovery> => ({
+  scanned_at: minutesAgo(minutes, now),
+  scanning: null,
+  roots: roots ?? [
+    root(DEV, suggestions.filter((s) => s.root === DEV).length),
+    root(CODE, suggestions.filter((s) => s.root === CODE).length),
+  ],
+  suggestions,
+});
+
+const listed: Row[] = ["example-app", "example-api", "example-handbook", "example-infra"].map((name) => inSync(name));
+
+const skippedClones = [
+  { path: `${DEV}/scratch`, name: "scratch", root: DEV },
+  { path: `${CODE}/old-experiments`, name: "old-experiments", root: CODE },
+];
+
+const discovery: Record<string, FakeOptions> = {
+  /** Panel 1, idle: the invitation, nothing scanned. */
+  invite: { rows: [] },
+  "invite-no-roots": { rows: [], discovery: { roots: [] } },
+  "invite-many-roots": {
+    rows: [],
+    discovery: { roots: [DEV, CODE, "~/Projects", "~/src"].map((path) => root(path, null)) },
+  },
+  /** Panel 2: partway through, the second root still being walked. */
+  looking: {
+    rows: [],
+    discovery: {
+      scanning: CODE,
+      roots: [root(DEV, 3), root(CODE, null)],
+      suggestions: [cache, queue],
+    },
+  },
+  /** Panel 3: a finished scan with nothing listed. */
+  found: { rows: [], discovery: scanned(six) },
+  /** Panel 4 once one suggestion is skipped (its play step): two listed, four still found. */
+  triage: {
+    rows: [
+      row({ name: "example-api", path: dev("example-api"), last_sync: minutesAgo(1, now) }),
+      row({ name: "example-notebook", path: dev("example-notebook") }),
+    ],
+    busy: [dev("example-notebook")],
+    discovery: scanned([cache, queue, search, notes, wiki]),
+  },
+  /** Panel 5: repos listed, two suggestions left unanswered three days ago. */
+  later: { rows: listed, discovery: scanned([notes, wiki], 3 * 24 * 60) },
+  /** Panel 6: looked again, every clone found is listed or skipped. */
+  "looked-again": {
+    rows: listed,
+    discovery: scanned([], 0, [root(DEV, 4), root(CODE, 2)]),
+  },
+  /** Panel 1, settled: the scan found no clone at all. */
+  "no-suggestions": { rows: listed, discovery: scanned([], 0, [root(DEV, 0), root(CODE, 0)]) },
+  /** Panel 7: first look found nothing; one root stopped at the folder cap. */
+  "found-nothing": {
+    rows: [],
+    discovery: scanned([], 0, [root(DEV, 0), root(CODE, 0, { stopped_early: true })]),
+  },
+  /** Panel 8: one folder unreadable, the rest shows. */
+  "found-error": {
+    rows: [],
+    discovery: scanned([cache, queue], 0, [
+      root(DEV, 2),
+      root(CODE, 0),
+      root("~/work", null, { error: "permission denied" }),
+    ]),
+  },
+  /** Panel 9: folders and skipped clones (open it from Found). */
+  "where-to-look": { rows: [], discovery: { ...scanned(six), skipped: skippedClones } },
+  "where-to-look-no-roots": { rows: [], discovery: { roots: [], skipped: skippedClones } },
+  "found-long-names": {
+    rows: [],
+    discovery: scanned([
+      suggestion("example-monorepo-with-a-really-long-name", DEV, "release/2026-11-campaign-and-tether"),
+      suggestion("example-infra-terraform-modules-and-more", "~/Code/clients/example-agency"),
+      cache,
+    ]),
+  },
+  /** *Add* is refused (as `add` does for a branch the remote lacks): the row stays, the strip says why. */
+  "add-fails": {
+    rows: [],
+    discovery: scanned(six),
+    suggestionAddFails: `${DEV}/search: origin has no branch develop`,
+  },
+  /** *Add* never finishes: the row stays, *Add* disabled. */
+  "add-pending": { rows: [], discovery: scanned(six), pendingActions: true },
+};
+
 export const SCENARIOS: Record<string, FakeOptions> = {
+  ...discovery,
   regular: { rows: regular, details: baseDetails },
   syncing: { rows: regular, details: baseDetails, busy: [dev("example-api"), "~/Mirrors/example-docs"] },
   "all-in-sync": { rows: allInSync, details: {} },

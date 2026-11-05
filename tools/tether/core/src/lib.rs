@@ -6,6 +6,7 @@ pub mod add;
 pub mod cli;
 pub mod config;
 pub mod ctx;
+pub mod discovery;
 pub mod follow;
 pub mod git;
 pub mod inspect;

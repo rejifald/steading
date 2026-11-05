@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tether-core = { path = "../core" }
+find-clones = { path = "../../../crates/find-clones" }
 tauri = { version = "2", features = ["tray-icon", "image-png", "macos-private-api"] }
 serde = { version = "1", features = ["derive"] }
 anyhow = "1"
