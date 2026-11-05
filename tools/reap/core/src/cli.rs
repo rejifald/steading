@@ -13,9 +13,10 @@ use clap::{Parser, Subcommand};
 use crate::add;
 use crate::ctx::Ctx;
 use crate::paths::Paths;
+use crate::pressure::Pressure;
 use crate::report;
 use crate::salvage;
-use crate::sweep::{self, Outcome};
+use crate::sweep::{self, Outcome, Swept};
 
 /// How long an explicit `sweep` waits for another run to release a clone.
 const EXPLICIT_WAIT: Duration = Duration::from_secs(30);
@@ -182,13 +183,17 @@ fn sweep_command(
 ) -> Result<()> {
     let ctx = Ctx::new(paths, dry_run);
     let now = Utc::now();
-    let outcomes = if due {
-        sweep::sweep_due(&ctx, now)?
-    } else {
-        sweep::sweep(&ctx, selector, EXPLICIT_WAIT, now)?
+    // With a repo named, only that repo is swept; otherwise the volumes get their pressure pass.
+    let swept = match (due, selector) {
+        (true, _) => sweep::sweep_due(&ctx, now)?,
+        (false, None) => sweep::sweep_all(&ctx, EXPLICIT_WAIT, now)?,
+        (false, Some(_)) => Swept {
+            repos: sweep::sweep(&ctx, selector, EXPLICIT_WAIT, now)?,
+            volumes: Vec::new(),
+        },
     };
     if json {
-        println!("{}", serde_json::to_string_pretty(&outcomes)?);
+        println!("{}", serde_json::to_string_pretty(&swept)?);
         return Ok(());
     }
     if dry_run {
@@ -197,10 +202,55 @@ fn sweep_command(
     if due && ctx.paths.is_paused() {
         println!("paused: nothing swept");
     }
-    for outcome in &outcomes {
+    for outcome in &swept.repos {
         print!("{}", describe(outcome));
     }
+    for pressure in &swept.volumes {
+        print!("{}", describe_pressure(pressure));
+    }
     Ok(())
+}
+
+/// What the pressure pass did about one volume, for the terminal; nothing for a healthy one.
+fn describe_pressure(pressure: &Pressure) -> String {
+    let volume = &pressure.volume;
+    if !volume.is_low && pressure.removed.is_empty() && pressure.log.is_empty() {
+        return String::new();
+    }
+    let mut lines = report::describe_volume(volume);
+    lines.extend(pressure.log.iter().map(|line| format!("  {line}")));
+    for reclaimed in &pressure.removed {
+        lines.push(format!(
+            "  low disk: removed {} ({})",
+            reclaimed.removed.path,
+            report::shown_size(reclaimed.bytes)
+        ));
+    }
+    if !pressure.removed.is_empty() {
+        lines.push(format!(
+            "  freed {} on {}",
+            report::shown_size(pressure.freed_bytes),
+            volume.name
+        ));
+    }
+    for refused in &pressure.refused {
+        lines.push(format!(
+            "  git refused to remove {}: {}",
+            refused.path, refused.message
+        ));
+    }
+    for skipped in &pressure.skipped {
+        lines.push(format!("  skipped {}: {}", skipped.path, skipped.message));
+    }
+    for asked in &pressure.asked {
+        lines.push(format!(
+            "  low disk: {} is removable; confirm with Remove now",
+            asked.path
+        ));
+    }
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
 }
 
 /// What a pass did to one repo, for the terminal.

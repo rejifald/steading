@@ -49,8 +49,18 @@ All notable changes to this project are documented in this file. The format foll
   `status` and the popover's *Salvaged* section show them too. A sweep deletes a save after
   `salvage_max_age` (default 30 days).
 
+- On a low disk a removable worktree goes without waiting out its grace
+  ([ADR low-disk-skips-the-grace](docs/adr/0005-low-disk-skips-the-grace.md)): when a volume's
+  free space falls below `low_disk` (default `10%`, a size, or `off`), every tick removes
+  removable worktrees of `policy = "auto"` repos, largest first, until it has 1.5 times that
+  free, then notifies per volume; once per episode it says when nothing is left to remove and
+  what holds the space. `git reap status` shows each volume's free space and marks a low one,
+  and the tray shows *needs you* while one stays low with nothing to remove.
+
 ### Changed
 
+- `git reap sweep --json` prints `{"repos": [...], "volumes": [...]}` instead of the repo
+  outcomes alone.
 - The popover groups worktrees by outcome across repos (*Needs you*, *Ready to remove*,
   *Merged, but held*, *In progress*, *Kept*), titles each row by its branch, says in a plain
   sentence what happens to it, and offers *Remove all* with a confirm.
