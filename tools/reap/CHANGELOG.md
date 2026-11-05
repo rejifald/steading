@@ -7,6 +7,13 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- Dev servers ([ADR 0005](docs/adr/0005-a-worktrees-leftovers-are-reaped-with-it.md) rules 3, 5
+  and 6, the servers part): `git reap ps [--json]` lists every process group that listens on a
+  TCP port with a process inside a listed clone's linked worktree, and `git reap stop <pid>`
+  stops one on request, with `SIGTERM` to its group, never `SIGKILL`, after checking again the
+  owner, the start time, the worktree and every process in the group. The report gains
+  `servers`, `other_processes` and `servers_error`, and the app a `stop_process` command.
+
 - `git reap discover [--json]`, `skip` and `unskip` ([repo ADR 0004](../../docs/adr/0004-each-tool-suggests-the-clones-it-finds.md)):
   suggest the unlisted clones that have linked worktrees, found by a bounded, read-only walk of
   `scan` in `repos.toml`; `skip` hides one, and `remove` now skips what it unlists. The last scan

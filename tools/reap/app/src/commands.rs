@@ -109,6 +109,30 @@ pub async fn remove_now(state: Shared<'_>, path: String) -> Result<(), String> {
     .await?
 }
 
+/// *Stop* on a server (ADR 0005 rules 5 and 6): the click is the operator's request. Calls the
+/// same guarded core as `git reap stop`, with the `started_at` the popover showed, so a pid
+/// reused since is refused; stops that one server's group and removes nothing.
+#[tauri::command]
+pub async fn stop_process(
+    state: Shared<'_>,
+    pid: u32,
+    started_at: String,
+) -> Result<reap_core::servers::Stopped, String> {
+    let state = state.inner().clone();
+    blocking(move || {
+        let result = reap_core::servers::stop(
+            &state.paths,
+            pid,
+            Some(&started_at),
+            false,
+            reap_core::servers::STOP_WAIT,
+        );
+        state.send(Event::Refresh);
+        result.map_err(|e| format!("{e:#}"))
+    })
+    .await?
+}
+
 /// *Save and remove*: saves an abandoned worktree to a ref, then removes it (ADR 0006); the
 /// click is the operator's confirmation.
 #[tauri::command]

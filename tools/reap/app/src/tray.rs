@@ -45,6 +45,7 @@ pub fn run() {
             commands::unkeep,
             commands::remove_now,
             commands::save_and_remove,
+            commands::stop_process,
             commands::delete_salvaged,
             commands::find_clones,
             commands::add_suggestion,

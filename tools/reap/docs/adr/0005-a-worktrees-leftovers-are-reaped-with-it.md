@@ -1,6 +1,7 @@
 # ADR 0005: a worktree's build caches, Compose stack and dev servers go with it
 
-- **Status:** Proposed
+- **Status:** Accepted for dev servers (rule 3, and the operator's *Stop* of rules 5 and 6), on
+  2026-11-05; the rest is Proposed
 - **Date:** 2026-11-04
 - **Amends:** [ADR 0001](0001-reap-sweeps-merged-worktrees.md), rules 5, 6, 11 and 15
 
@@ -72,7 +73,12 @@ matched to a worktree by its name, which is a guess.
    - **Compose:** `docker compose --project-name <project> down` for each project the worktree
      holds, running or stopped. Never `--volumes`, so named volumes and the data in them survive,
      and a `compose up` from another worktree brings the stack back.
-   - **Servers:** `SIGTERM` to each server's process group, then up to 10 s for it to exit. Once
+   - **Servers:** first, reap checks each server again and signals nothing if one check fails:
+     the process is the operator's own, it is the process that was listed (the same start time,
+     so a reused pid is refused), it is still inside the worktree, its group still listens, and
+     every process in its group is the operator's and inside the same worktree. A group reap
+     cannot tie wholly to the worktree, or reap's own group, is never signalled. Then it sends
+     `SIGTERM` to each server's process group, and waits up to 10 s for it to exit. Once
      the servers are gone, an idle launching shell with nothing left to wait for gets `SIGHUP`,
      as closing its terminal tab would, since a shell left in the worktree would still hold it.
      reap never sends `SIGKILL`. A server still running then is recorded as a refusal on the row,

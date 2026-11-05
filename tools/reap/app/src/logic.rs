@@ -339,6 +339,7 @@ mod tests {
             size_bytes: None,
             local: Vec::new(),
             held_by: None,
+            other_processes: Vec::new(),
         }
     }
 
@@ -358,7 +359,9 @@ mod tests {
                 error: error.map(str::to_string),
                 worktrees,
                 salvaged: Vec::new(),
+                servers: Vec::new(),
             }],
+            servers_error: None,
         }
     }
 

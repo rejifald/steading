@@ -148,6 +148,29 @@ the changes are uncommitted again (all unstaged: the staged/unstaged split is no
 | `REAP_GIT` | the `git` binary instead of `git` on `PATH` |
 | `REAP_GH` | the `gh` binary instead of `gh` on `PATH`; tests point it at a fake |
 
+## Dev servers
+
+A *server* is a process of yours whose current directory is inside a listed clone's linked
+worktree and whose process group listens on a TCP port, such as a forgotten `npm run dev`
+([ADR 0005](docs/adr/0005-a-worktrees-leftovers-are-reaped-with-it.md) rule 3). Every pass lists
+them; reap never stops one by itself.
+
+- `git reap ps [--json]` lists them: name, ports, pid, uptime, worktree and command line.
+- `git reap stop <pid> [--started-at <time>] [--dry-run] [--json]` stops one, on your request
+  only. It checks the pid again first and refuses, signalling nothing, unless the pid is still
+  yours, is still the process that `--started-at` names (the `started_at` that `ps --json`
+  printed), is still inside a listed clone's linked worktree, its group still listens, and every
+  process in that group is yours and inside the same worktree. Then it sends `SIGTERM` to the
+  group and waits up to 10 s. If the group exits, an idle launching shell left in the worktree
+  gets `SIGHUP`, as closing its terminal tab would. reap never sends `SIGKILL`: a group still
+  running is reported, and `stop` exits 1. `--dry-run` prints the signals as `would run:`.
+
+`git reap status --json` and the popover's report carry them as `servers` on each repo, beside
+`worktrees` (`pid`, `pgid`, `name`, `command`, `ports`, `started_at`, `worktree`, and `shell`
+when it has an idle launching shell). Each row also has `other_processes`, the names of the
+processes inside it that reap will not stop, and the report has `servers_error` when the
+processes could not be read.
+
 ## Architecture
 
 ADR 0001 rules 14 to 18: a Rust core crate, a Tauri v2 tray shell with a React popover, and
