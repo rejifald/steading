@@ -1,6 +1,6 @@
 # ADR 0006: an abandoned worktree is saved to a ref, then offered for removal
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-05
 - **Amends:** [ADR 0001](0001-reap-sweeps-merged-worktrees.md), rules 3, 13 and 15;
   [ADR 0003](0003-pushed-stale-worktrees-are-removed.md), rule 3; and

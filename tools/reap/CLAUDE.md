@@ -21,10 +21,14 @@ Part of steading: the repo-wide commands, commit rules and owner paths are in th
 
 reap deletes things, so ADR 0001 rules 3 to 6 and 11 are invariants, not defaults: removal is
 `git worktree remove` without `--force`, `git branch -D` only with `gh`'s proof that a merged
-pull request contains the tip (ADR 0002), nothing on a remote, nothing in a main clone. The one
-`--force` is a dirty merged worktree's, and only after its changes are saved to
+pull request contains the tip (ADR 0002), nothing on a remote, nothing in a main clone. There are two
+`--force`s. The first is a dirty merged worktree's, and only after its changes are saved to
 `refs/reap/salvage/` and checked
-([ADR dirty-merged-worktrees-are-salvaged](docs/adr/0004-dirty-merged-worktrees-are-salvaged.md));
-`git stash` is never used. A change
+([ADR dirty-merged-worktrees-are-salvaged](docs/adr/0004-dirty-merged-worktrees-are-salvaged.md)).
+The second is an abandoned worktree's, and only on the operator's confirmation (*Save and remove*,
+`git reap salvage`), after its whole state is saved and checked the same way; its branch is kept,
+no sweep or policy ever removes one, and its save never expires
+([ADR 0006](docs/adr/0006-abandoned-worktrees-are-saved-then-offered.md)). `git branch -D` also
+follows a merged pull request found by HEAD's commit (rule 3(d)). `git stash` is never used. A change
 that loosens one of them needs a new ADR first. Tests build real repositories in a temp dir; they
 never touch a clone outside it, and never reach GitHub (a fake `gh` answers from fixtures, rule 17).

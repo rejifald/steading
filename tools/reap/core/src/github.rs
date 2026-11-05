@@ -1,8 +1,10 @@
 //! Pull requests from `gh` (rule 9): one batched `gh pr list --json` per repo per pass, a
 //! GraphQL lookup for the worktree branches it missed, and a compare call for a merged head the
-//! clone lacks (ADR 0002). `gh` is optional; without it, reap sees ancestry merges (rule 3a)
+//! clone lacks (ADR 0002), and a GraphQL lookup of the pull requests associated with the HEADs
+//! that are still unmerged (ADR 0006). `gh` is optional; without it, reap sees ancestry merges (rule 3a)
 //! only, and says why.
 
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -147,7 +149,7 @@ fn parse_lookup(stdout: &[u8]) -> Vec<PullRequest> {
     }
     #[derive(Deserialize)]
     struct Data {
-        repository: std::collections::BTreeMap<String, Nodes>,
+        repository: BTreeMap<String, Nodes>,
     }
     #[derive(Deserialize)]
     struct Response {
@@ -163,6 +165,94 @@ fn parse_lookup(stdout: &[u8]) -> Vec<PullRequest> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The pull requests GitHub associates with each of `heads` (full SHAs), whatever their branch
+/// (ADR 0006, rule 1): one GraphQL call per [`LOOKUP_BATCH`] commits, `object(oid:)` with
+/// `associatedPullRequests`. A commit GitHub does not have comes back `null` and maps to no pull
+/// request, as does every commit of a failed call; neither can make a worktree merged. Never
+/// GitHub's search, which also matches a SHA quoted in a pull request's text.
+#[must_use]
+pub fn associated(
+    gh: &OsStr,
+    dir: &Path,
+    repo: &str,
+    heads: &[String],
+) -> BTreeMap<String, Vec<PullRequest>> {
+    let mut found: BTreeMap<String, Vec<PullRequest>> = BTreeMap::new();
+    let Some((owner, name)) = repo.split_once('/') else {
+        return found;
+    };
+    // `object(oid:)` needs the full object name; anything else is an error for the whole call.
+    let heads: Vec<&String> = heads.iter().filter(|head| is_full_sha(head)).collect();
+    for chunk in heads.chunks(LOOKUP_BATCH) {
+        let query = associated_query(owner, name, chunk);
+        let answer = api(gh, dir, &["graphql", "-f", &format!("query={query}")])
+            .map(|stdout| parse_associated(&stdout))
+            .unwrap_or_default();
+        for (index, head) in chunk.iter().enumerate() {
+            let pull_requests = answer.get(&index).cloned().unwrap_or_default();
+            found.insert((*head).clone(), pull_requests);
+        }
+    }
+    found
+}
+
+/// 40 hex digits (SHA-1) or 64 (SHA-256).
+fn is_full_sha(text: &str) -> bool {
+    matches!(text.len(), 40 | 64) && text.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn associated_query(owner: &str, name: &str, heads: &[&String]) -> String {
+    let literal = |text: &str| serde_json::to_string(text).unwrap_or_default();
+    let mut fields = String::new();
+    for (index, head) in heads.iter().enumerate() {
+        let _ = write!(
+            fields,
+            "c{index}: object(oid: {}) {{ ... on Commit {{ associatedPullRequests(first: 5) \
+             {{ nodes {{ {NODE_FIELDS} }} }} }} }} ",
+            literal(head)
+        );
+    }
+    format!(
+        "query {{ repository(owner: {}, name: {}) {{ {fields}}} }}",
+        literal(owner),
+        literal(name)
+    )
+}
+
+/// The pull requests of each `c<index>` alias; a `null` commit has none.
+fn parse_associated(stdout: &[u8]) -> BTreeMap<usize, Vec<PullRequest>> {
+    #[derive(Deserialize)]
+    struct Nodes {
+        nodes: Vec<PullRequest>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Commit {
+        associated_pull_requests: Option<Nodes>,
+    }
+    #[derive(Deserialize)]
+    struct Data {
+        repository: BTreeMap<String, Option<Commit>>,
+    }
+    #[derive(Deserialize)]
+    struct Response {
+        data: Data,
+    }
+    let Ok(response) = serde_json::from_slice::<Response>(stdout) else {
+        return BTreeMap::new();
+    };
+    response
+        .data
+        .repository
+        .into_iter()
+        .filter_map(|(alias, commit)| {
+            let index = alias.strip_prefix('c')?.parse().ok()?;
+            let nodes = commit?.associated_pull_requests?.nodes;
+            Some((index, nodes))
+        })
+        .collect()
 }
 
 /// Whether GitHub holds `ancestor` as an ancestor of, or equal to, `of` (ADR 0002, rule 1). A
@@ -215,6 +305,33 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].number, 7);
         assert_eq!(parse_lookup(b"[]"), Vec::new());
+    }
+
+    #[test]
+    fn an_associated_lookup_asks_for_each_full_sha_by_object() {
+        let sha = "0123456789abcdef0123456789abcdef01234567".to_string();
+        let query = associated_query("acme", "app", &[&sha]);
+
+        assert!(query.contains(&format!(
+            r#"c0: object(oid: "{sha}") {{ ... on Commit {{ associatedPullRequests(first: 5)"#
+        )));
+        assert!(is_full_sha(&sha));
+        assert!(!is_full_sha("0123456"));
+        assert!(!is_full_sha("main\") { x }"));
+    }
+
+    #[test]
+    fn parses_an_associated_lookup_with_a_null_commit() {
+        let json = br#"{"data":{"repository":{"c0":null,"c1":{"associatedPullRequests":{"nodes":[
+            {"number":212,"state":"MERGED","headRefName":"batch","headRefOid":"abc",
+            "baseRefName":"main","url":"u"}]}},"c2":{}}}}"#;
+
+        let found = parse_associated(json);
+
+        assert_eq!(found.get(&0), None);
+        assert_eq!(found[&1][0].number, 212);
+        assert_eq!(found.get(&2), None);
+        assert!(parse_associated(b"{}").is_empty());
     }
 
     #[test]

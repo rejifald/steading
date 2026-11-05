@@ -16,7 +16,8 @@ interface WorktreeRowProps {
   onAction: (action: WorktreeAction, path: string) => void;
   /** A Needs-you row: a raised callout whose sentence wraps, with text buttons below it. */
   emphasis?: boolean;
-  /** A removal of this worktree is running: the progress wash and hairline, `removing…`. */
+  /** A removal of this worktree is running: the progress wash and hairline, `removing…`; on a
+   * Needs-you row, the save-and-remove button reads `Saving…`. */
   isRemoving?: boolean;
 }
 
@@ -75,20 +76,33 @@ function RowActions({ worktree, onAction }: Pick<WorktreeRowProps, "worktree" | 
   );
 }
 
+/** Whether a row's work exists only here, so taking it away means saving it first (ADR 0006). */
+function isAbandonedWork(worktree: Worktree): boolean {
+  return worktree.state === "abandoned" || (worktree.state === "refused" && (worktree.local?.length ?? 0) > 0);
+}
+
 /** One worktree as two lines: the branch and where it lives, then what happens to it. */
 export function WorktreeRow({ worktree, repo, now, onAction, emphasis = false, isRemoving = false }: WorktreeRowProps) {
   const meta = metaOf(worktree, repo, now);
   const sentence = sentenceOf(worktree, repo, now);
   if (emphasis) {
+    // An abandoned worktree is saved to a ref first; a refused one retries what failed.
+    const removal: WorktreeAction = isAbandonedWork(worktree) ? "save-and-remove" : "remove-now";
+    const offersRemoval = worktree.state === "abandoned" || worktree.state === "refused";
+    const removalLabel = worktree.state === "refused" ? "Try again" : "Save and remove";
     return (
-      <li aria-label={titleOf(worktree)} aria-description={descriptionOf(worktree, now)}>
+      <li
+        aria-label={titleOf(worktree)}
+        aria-description={descriptionOf(worktree, now)}
+        aria-busy={isRemoving || undefined}
+      >
         <NeedsYouCallout title={titleOf(worktree)} meta={meta} sentence={sentence}>
-          {worktree.state === "refused" && (
+          {offersRemoval && (
             <>
-              <TextButton variant="inset" onClick={() => onAction("remove-now", worktree.path)}>
-                Try again
+              <TextButton variant="inset" disabled={isRemoving} onClick={() => onAction(removal, worktree.path)}>
+                {isRemoving && removal === "save-and-remove" ? "Saving…" : removalLabel}
               </TextButton>
-              <TextButton variant="inset" onClick={() => onAction("keep", worktree.path)}>
+              <TextButton variant="inset" disabled={isRemoving} onClick={() => onAction("keep", worktree.path)}>
                 Keep
               </TextButton>
             </>

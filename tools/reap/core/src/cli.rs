@@ -1,4 +1,4 @@
-//! The CLI (rule 14): `git reap status|sweep|salvaged|add|remove|discover|skip|unskip|keep|unkeep|pause|resume`. It
+//! The CLI (rule 14): `git reap status|sweep|salvage|salvaged|add|remove|discover|skip|unskip|keep|unkeep|pause|resume`. It
 //! reads git and the config directly; there is no IPC with the tray app.
 
 use std::ffi::OsString;
@@ -56,11 +56,25 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// The uncommitted changes saved from removed worktrees, and how to restore each (ADR
-    /// dirty-merged-worktrees-are-salvaged).
-    Salvaged {
+    /// Save an abandoned worktree's whole state to a ref, then remove it, keeping its branch
+    /// (ADR 0006). Only a stale worktree with something local that no guard holds.
+    Salvage {
+        worktree: String,
+        /// Print every command that would change a repo, prefixed `would run:`, and run none.
         #[arg(long)]
+        dry_run: bool,
+    },
+    /// The saves of removed worktrees, abandoned ones apart, and how to restore each (ADRs
+    /// dirty-merged-worktrees-are-salvaged and 0006).
+    Salvaged {
+        #[arg(long, conflicts_with = "delete")]
         json: bool,
+        /// Delete one save, by its full ref (`refs/reap/salvage/…`).
+        #[arg(long, value_name = "REF")]
+        delete: Option<String>,
+        /// The repo, by name or path, whose save `--delete` deletes, when several have the ref.
+        #[arg(long, requires = "delete")]
+        repo: Option<String>,
     },
     /// List a main clone in repos.toml (rule 1).
     Add {
@@ -150,7 +164,17 @@ fn dispatch(command: Command) -> Result<()> {
             due,
             json,
         } => sweep_command(paths, repo.as_deref(), dry_run, due, json)?,
-        Command::Salvaged { json } => {
+        Command::Salvage { worktree, dry_run } => salvage_command(paths, &worktree, dry_run)?,
+        Command::Salvaged {
+            delete: Some(refname),
+            repo,
+            ..
+        } => {
+            let ctx = Ctx::new(paths, false);
+            let repo = salvage::delete(&ctx, repo.as_deref(), &refname)?;
+            println!("deleted {refname} in {repo}");
+        }
+        Command::Salvaged { json, .. } => {
             let salvaged = salvage::salvaged(&paths)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&salvaged)?);
@@ -256,6 +280,29 @@ fn sweep_command(
     }
     for pressure in &swept.volumes {
         print!("{}", describe_pressure(pressure, dry_run));
+    }
+    Ok(())
+}
+
+/// `git reap salvage <worktree>`: the commands it runs (or would), then where the work went.
+fn salvage_command(paths: Paths, worktree: &str, dry_run: bool) -> Result<()> {
+    let ctx = Ctx::new(paths, dry_run);
+    let result = sweep::salvage_now(&ctx, worktree, Utc::now());
+    if dry_run {
+        println!("dry run: no command that changes a repo was run");
+    }
+    for line in ctx.take_log() {
+        println!("  {line}");
+    }
+    let removed = result?;
+    let verb = if dry_run { "would save" } else { "saved" };
+    let refname = removed.salvaged_to.as_deref().unwrap_or("a salvage ref");
+    println!("{verb} {} to {refname}", removed.path);
+    if let Some(branch) = &removed.branch {
+        println!("  its branch {branch} is kept");
+    }
+    if !dry_run {
+        println!("  `git reap salvaged` says how to restore it, or delete the save");
     }
     Ok(())
 }
@@ -408,6 +455,20 @@ mod tests {
             &["sweep", "--due"],
             &["salvaged"],
             &["salvaged", "--json"],
+            &[
+                "salvaged",
+                "--delete",
+                "refs/reap/salvage/feat/20261105-120000",
+            ],
+            &[
+                "salvaged",
+                "--delete",
+                "refs/reap/salvage/x/1",
+                "--repo",
+                "app",
+            ],
+            &["salvage", "~/Development/app-feat"],
+            &["salvage", "~/Development/app-feat", "--dry-run"],
             &["keep", "~/Development/app-feat"],
             &["unkeep", "~/Development/app-feat"],
             &["pause"],
@@ -537,6 +598,8 @@ mod tests {
         assert_eq!(run(["git-reap", "status", "--yaml"]), 2);
         assert_eq!(run(["git-reap", "sweep", "app", "--due"]), 2);
         assert_eq!(run(["git-reap", "keep"]), 2);
+        assert_eq!(run(["git-reap", "salvage"]), 2);
+        assert_eq!(run(["git-reap", "salvaged", "--repo", "app"]), 2);
         assert_eq!(run(["git-reap", "skip"]), 2);
         assert_eq!(run(["git-reap", "unskip"]), 2);
         assert_eq!(run(["git-reap", "discover", "--yaml"]), 2);

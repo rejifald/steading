@@ -27,32 +27,53 @@ pub fn next_scanning(roots: &[String], left: &str) -> Option<String> {
     roots.get(at + 1).cloned()
 }
 
-/// Paths that need the owner now but did not before, with why. `previous` is replaced by the
-/// current set, so a path that recovers and breaks again is reported again.
+/// The notification of something that needs the owner now but did not before, as (title,
+/// message). `previous` is replaced by the current set, keyed by path and state, so a path that
+/// recovers and breaks again is reported again, and a held stale worktree that becomes saveable
+/// is reported as abandoned (ADR 0006 rule 6).
 pub fn new_needs_you(previous: &mut HashSet<String>, report: &Report) -> Vec<(String, String)> {
     let mut current = HashSet::new();
     let mut fresh = Vec::new();
     for repo in &report.repos {
-        let mut found = |path: &str, why: &str| {
-            if !previous.contains(path) {
-                fresh.push((path.to_string(), why.to_string()));
+        let mut found = |key: String, title: &str, message: String| {
+            if !previous.contains(&key) {
+                fresh.push((title.to_string(), message));
             }
-            current.insert(path.to_string());
+            current.insert(key);
         };
         if let Some(error) = &repo.error {
-            found(&repo.path, error);
+            found(
+                format!("error:{}", repo.path),
+                NEEDS_YOU,
+                format!("{}: {error}", repo.path),
+            );
         }
-        for row in repo
-            .worktrees
-            .iter()
-            .filter(|row| row.state == State::Stale)
-        {
-            found(&row.path, &row.reason);
+        for row in &repo.worktrees {
+            match row.state {
+                State::Stale => found(
+                    format!("stale:{}", row.path),
+                    NEEDS_YOU,
+                    format!("{}: {}", row.path, row.reason),
+                ),
+                State::Abandoned => found(
+                    format!("abandoned:{}", row.path),
+                    TO_SAVE,
+                    format!(
+                        "{}: {}; Save and remove keeps its work in a ref",
+                        row.path, row.reason
+                    ),
+                ),
+                _ => {}
+            }
         }
     }
     *previous = current;
     fresh
 }
+
+const NEEDS_YOU: &str = "reap needs you";
+/// The title of an abandoned worktree's one notification.
+const TO_SAVE: &str = "reap: worktree to save";
 
 /// The most holders a "still low" notice names; the rest are counted.
 const MAX_HOLDERS: usize = 3;
@@ -222,8 +243,9 @@ pub fn batched(messages: Vec<(String, String)>) -> Vec<(String, String)> {
     let parts: Vec<String> = [
         ("reap: worktree to remove", "to remove"),
         ("reap removed a worktree", "removed"),
+        (TO_SAVE, "to save"),
         ("reap: low disk", "low disk"),
-        ("reap needs you", "need you"),
+        (NEEDS_YOU, "need you"),
     ]
     .iter()
     .map(|(title, word)| (count(title), word))
@@ -315,6 +337,8 @@ mod tests {
             removes_at: None,
             saves_at: None,
             size_bytes: None,
+            local: Vec::new(),
+            held_by: None,
         }
     }
 
@@ -503,6 +527,25 @@ mod tests {
     }
 
     #[test]
+    fn an_abandoned_worktree_is_reported_once_even_after_it_was_held() {
+        let mut previous = HashSet::new();
+        let held = report(vec![row("~/w/a", State::Stale)], None);
+        let abandoned = report(vec![row("~/w/a", State::Abandoned)], None);
+
+        new_needs_you(&mut previous, &held);
+        let fresh = new_needs_you(&mut previous, &abandoned);
+
+        assert_eq!(fresh.len(), 1);
+        assert_eq!(fresh[0].0, "reap: worktree to save");
+        assert!(
+            fresh[0]
+                .1
+                .ends_with("Save and remove keeps its work in a ref")
+        );
+        assert_eq!(new_needs_you(&mut previous, &abandoned).len(), 0);
+    }
+
+    #[test]
     fn an_unreadable_repo_needs_you() {
         let mut previous = HashSet::new();
 
@@ -514,8 +557,8 @@ mod tests {
         assert_eq!(
             fresh,
             [(
-                "~/app".to_string(),
-                "origin/main does not exist".to_string()
+                "reap needs you".to_string(),
+                "~/app: origin/main does not exist".to_string()
             )]
         );
     }

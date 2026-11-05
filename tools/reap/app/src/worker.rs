@@ -68,10 +68,9 @@ fn pass(app: &AppHandle, state: &Arc<State>, needed_you: &mut HashSet<String>, i
     match result {
         Ok((report, swept)) => {
             let mut messages = logic::notifications(&swept.repos, &swept.volumes);
-            for (path, why) in logic::new_needs_you(needed_you, &report) {
-                if !is_first {
-                    messages.push(("reap needs you".into(), format!("{path}: {why}")));
-                }
+            let fresh = logic::new_needs_you(needed_you, &report);
+            if !is_first {
+                messages.extend(fresh);
             }
             for (title, message) in logic::batched(messages) {
                 notify(&title, &message);

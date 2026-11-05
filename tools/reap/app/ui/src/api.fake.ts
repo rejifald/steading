@@ -1,4 +1,4 @@
-import type { Discovery, Overall, ReapApi, Repo, Report, RootInfo, Snapshot, SkippedClone, Suggestion, Worktree } from "./api";
+import type { Discovery, Overall, ReapApi, Repo, Report, RootInfo, Salvaged, Snapshot, SkippedClone, State, Suggestion, Worktree } from "./api";
 
 /** How long a fake refresh takes, so the refreshing state is visible in a browser. */
 const FAKE_REFRESH_TIME = 800;
@@ -8,6 +8,27 @@ const FAKE_ROOT_TIME = 600;
 
 const minutesAgo = (minutes: number, now: Date) =>
   new Date(now.getTime() - minutes * 60_000).toISOString();
+
+const DAY_MINUTES = 60 * 24;
+
+/** The states the tray counts as needing the owner. */
+const NEEDS_YOU: readonly State[] = ["stale", "abandoned", "refused"];
+
+/** A save in `repo`, as `git reap salvaged` lists it. */
+export function sampleSave(
+  repo: Pick<Repo, "path">,
+  fields: Pick<Salvaged, "refname" | "saved_at"> & Partial<Salvaged>,
+): Salvaged {
+  const worktree = fields.worktree ?? `~/Development/worktrees/${fields.refname.split("/").at(-2) ?? "saved"}`;
+  return {
+    commit: "0123456789abcdef0123456789abcdef01234567",
+    kind: "merged",
+    worktree,
+    restore: `git -C ${repo.path} worktree add ${worktree} ${fields.refname} && git -C ${worktree} reset HEAD~1`,
+    delete: `git reap salvaged --delete ${fields.refname}`,
+    ...fields,
+  };
+}
 
 /** Two repos covering every state, with the CLI's own reason lines. */
 export function sampleRepos(now = new Date()): Repo[] {
@@ -84,14 +105,36 @@ export function sampleRepos(now = new Date()): Repo[] {
       base: "origin/main",
       policy: "auto",
       gh_note: "gh is not installed: only ancestry merges are seen",
+      salvaged: [
+        sampleSave(
+          { path: "~/Development/example-site" },
+          {
+            refname: "refs/reap/salvage/old-probe/20261101-090000",
+            kind: "abandoned",
+            reason: "abandoned (no commit or checkout for 40 days)",
+            saved_at: minutesAgo(DAY_MINUTES * 3, now),
+          },
+        ),
+      ],
       worktrees: [
         worktree({
           name: "old-redesign",
           branch: "feat/redesign",
           pr: { number: 12, state: "closed", url: "https://example.com/pull/12" },
           state: "stale",
-          reason: "pull request #12 closed without merging",
-          last_activity: minutesAgo(60 * 24 * 12, now),
+          reason: "pull request #12 closed without merging · 3 commits on no remote · a process is running inside it",
+          local: ["3 commits on no remote"],
+          held_by: "a process is running inside it",
+          last_activity: minutesAgo(DAY_MINUTES * 12, now),
+        }),
+        worktree({
+          name: "docs-pages",
+          branch: "docs/pages",
+          state: "abandoned",
+          reason: "no commit or checkout for 119 days · 13 uncommitted changes · 22 commits on no remote",
+          local: ["13 uncommitted changes", "22 commits on no remote"],
+          last_activity: minutesAgo(DAY_MINUTES * 119, now),
+          size_bytes: 2_100_000_000,
         }),
         worktree({
           name: "gone-fast",
@@ -137,7 +180,7 @@ export function emptyDiscovery(): Discovery {
 
 function overallOf(repos: Repo[]): Overall {
   const states = repos.flatMap((repo) => repo.worktrees.map((worktree) => worktree.state));
-  if (states.some((state) => state === "stale" || state === "refused")) return "needs-you";
+  if (states.some((state) => NEEDS_YOU.includes(state))) return "needs-you";
   if (states.some((state) => state === "removable" || state === "missing")) return "pending";
   return "tidy";
 }
@@ -209,7 +252,7 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
       paused,
       overall: overallOf(repos),
       removable: states.filter((state) => state === "removable" || state === "missing").length,
-      needs_you: states.filter((state) => state === "stale" || state === "refused").length,
+      needs_you: states.filter((state) => NEEDS_YOU.includes(state)).length,
       repos,
     };
     if (options.error !== undefined && options.repos === undefined) {
@@ -292,6 +335,41 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
       }
       if (options.holdsRemovals) return new Promise<void>(() => {});
       repos = repos.map((repo) => ({ ...repo, worktrees: repo.worktrees.filter((worktree) => worktree.path !== path) }));
+      emit();
+    },
+    saveAndRemove: async (path) => {
+      // Like the core: only an abandoned (or a failed save, retried) worktree is saved by hand.
+      const owner = repos.find((repo) => repo.worktrees.some((worktree) => worktree.path === path));
+      const target = owner?.worktrees.find((worktree) => worktree.path === path);
+      if (!owner || !target || (target.state !== "abandoned" && target.state !== "refused")) {
+        throw `${path} is not abandoned`;
+      }
+      if (options.holdsRemovals) return new Promise<void>(() => {});
+      const save = sampleSave(owner, {
+        refname: `refs/reap/salvage/${target.name}/20261105-120000`,
+        kind: "abandoned",
+        reason: "abandoned (no commit or checkout for 119 days)",
+        saved_at: new Date().toISOString(),
+        worktree: target.path,
+        ...(target.branch ? { branch: target.branch } : {}),
+      });
+      repos = repos.map((repo) =>
+        repo === owner
+          ? {
+              ...repo,
+              worktrees: repo.worktrees.filter((worktree) => worktree.path !== path),
+              salvaged: [...(repo.salvaged ?? []), save],
+            }
+          : repo,
+      );
+      emit();
+    },
+    deleteSalvaged: async (repoPath, refname) => {
+      repos = repos.map((repo) =>
+        repo.path === repoPath
+          ? { ...repo, salvaged: (repo.salvaged ?? []).filter((salvaged) => salvaged.refname !== refname) }
+          : repo,
+      );
       emit();
     },
     findClones: async () => {

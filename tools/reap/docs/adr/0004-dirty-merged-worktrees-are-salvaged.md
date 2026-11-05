@@ -1,6 +1,7 @@
 # ADR 0004: a merged worktree with uncommitted changes is saved to a ref, then removed
 
-- **Status:** Accepted
+- **Status:** Accepted; rule 4 and its closing clause amended by
+  [ADR 0006](0006-abandoned-worktrees-are-saved-then-offered.md)
 - **Date:** 2026-11-04
 - **Amends:** [ADR 0001](0001-reap-sweeps-merged-worktrees.md), rules 4, 6, 10 and 11, and the
   untracked-files clause of [ADR 0002](0002-merged-pull-request-contains-head.md)

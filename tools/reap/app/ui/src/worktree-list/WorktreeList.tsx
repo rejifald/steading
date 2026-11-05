@@ -9,7 +9,7 @@ import { OutcomeSection } from "./OutcomeSection";
 import { RemoveAllButton, RemoveAllConfirm } from "./RemoveAll";
 import { RepoErrorRow } from "./RepoErrorRow";
 import { RepoNotes } from "./RepoNotes";
-import { SalvagedSection } from "./SalvagedSection";
+import { SalvagedSection, SavedAbandonedSection } from "./SalvagedSection";
 import { WorktreeRow } from "./WorktreeRow";
 
 /** Ready rows shown before "Show N more". */
@@ -21,6 +21,8 @@ interface WorktreeListProps {
   repos: Repo[];
   now: Date;
   onAction: (action: WorktreeAction, path: string) => Promise<boolean> | void;
+  /** Deletes one save; resolves to whether it succeeded. */
+  onDeleteSalvaged?: (repo: string, refname: string) => Promise<boolean> | void;
   /** Worktrees whose removal is running, by path. */
   removing?: ReadonlySet<string>;
   /** The Found section: the last thing in the scroll, after the outcome sections and the notes. */
@@ -79,7 +81,14 @@ function readyLeadOf(entries: Entry[]): string {
 }
 
 /** The scrolling middle of the popover: worktrees grouped by outcome across repos. */
-export function WorktreeList({ repos, now, onAction, removing = NONE_REMOVING, found = null }: WorktreeListProps) {
+export function WorktreeList({
+  repos,
+  now,
+  onAction,
+  onDeleteSalvaged = () => {},
+  removing = NONE_REMOVING,
+  found = null,
+}: WorktreeListProps) {
   const [isConfirmingRemoveAll, setIsConfirmingRemoveAll] = useState(false);
   const needsYou = entriesOf(repos, "needs-you");
   const reposWithError = repos.filter((repo) => repo.error);
@@ -148,6 +157,7 @@ export function WorktreeList({ repos, now, onAction, removing = NONE_REMOVING, f
       <OutcomeSection outcome="kept" title="Kept" count={kept.length} collapsible summary="until new commits">
         {kept.map((entry) => row(entry))}
       </OutcomeSection>
+      <SavedAbandonedSection repos={repos} now={now} onDelete={onDeleteSalvaged} />
       <SalvagedSection repos={repos} now={now} />
       <RepoNotes repos={repos} />
       {found}

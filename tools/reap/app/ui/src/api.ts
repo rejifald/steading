@@ -9,12 +9,13 @@ export type State =
   | "in-use"
   | "locked"
   | "stale"
+  | "abandoned"
   | "missing"
   | "kept"
   | "refused";
 
 /** What the popover can do to one worktree. */
-export type WorktreeAction = "open" | "keep" | "unkeep" | "remove-now";
+export type WorktreeAction = "open" | "keep" | "unkeep" | "remove-now" | "save-and-remove";
 
 /** The whole tray's state: nothing to do, a removal pending, or something only the user can fix. */
 export type Overall = "tidy" | "pending" | "needs-you";
@@ -23,6 +24,8 @@ export interface PullRequest {
   number: number;
   state: "open" | "merged" | "closed";
   url: string;
+  /** Found by HEAD's commit rather than by the branch: `in #212, merged` (ADR 0006). */
+  by_commit?: boolean;
 }
 
 export interface Worktree {
@@ -46,12 +49,20 @@ export interface Worktree {
   saves_at?: string;
   /** The disk space removing it would free; absent when the folder is gone or unreadable. */
   size_bytes?: number;
+  /** A stale worktree's work that exists only here, each as `reason` names it (ADR 0006 rule 9). */
+  local?: string[];
+  /** The guard that holds a stale worktree; also the end of `reason`. */
+  held_by?: string;
 }
 
-/** Uncommitted changes saved from a removed worktree, under `refs/reap/salvage/`. */
+/** A removed worktree's state saved to a ref under `refs/reap/salvage/`. */
 export interface Salvaged {
   refname: string;
   commit: string;
+  /** A merged worktree's changes expire; an abandoned worktree's save stays until deleted. */
+  kind: "merged" | "abandoned";
+  /** An abandoned save's `Reap-Reason`: `abandoned (<stale reason>)`. */
+  reason?: string;
   /** The worktree it was saved from, with `~`. */
   worktree?: string;
   branch?: string;
@@ -61,6 +72,8 @@ export interface Salvaged {
   prunes_at?: string;
   /** The shell commands that bring the changes back, uncommitted, in a new worktree. */
   restore: string;
+  /** The command that deletes the save. */
+  delete: string;
 }
 
 export interface Repo {
@@ -158,6 +171,10 @@ export interface ReapApi {
   unkeep(path: string): Promise<void>;
   /** Removes a removable worktree at once, with the same guards and no grace period. */
   removeNow(path: string): Promise<void>;
+  /** Saves an abandoned worktree to a ref, then removes it, keeping its branch. */
+  saveAndRemove(path: string): Promise<void>;
+  /** Deletes one save, in the repo it is listed under. */
+  deleteSalvaged(repo: string, refname: string): Promise<void>;
   /** Starts a scan of the roots in the background and returns at once; progress arrives as snapshots. */
   findClones(): Promise<void>;
   /** Lists a suggested clone, as *Add repository* would; rejects with `add`'s own text. */
@@ -184,6 +201,8 @@ export const tauriApi: ReapApi = {
   keep: (path) => invoke("keep", { path }),
   unkeep: (path) => invoke("unkeep", { path }),
   removeNow: (path) => invoke("remove_now", { path }),
+  saveAndRemove: (path) => invoke("save_and_remove", { path }),
+  deleteSalvaged: (repo, refname) => invoke("delete_salvaged", { repo, refname }),
   findClones: () => invoke("find_clones"),
   addSuggestion: (path) => invoke("add_suggestion", { path }),
   skipClone: (path) => invoke("skip_clone", { path }),

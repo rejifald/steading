@@ -3,13 +3,15 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import type { Repo, Salvaged } from "../api";
-import { SalvagedSection, salvagedEntriesOf, salvagedTitleOf } from "./SalvagedSection";
+import { SalvagedSection, SavedAbandonedSection, salvagedEntriesOf, salvagedTitleOf } from "./SalvagedSection";
 
 const NOW = new Date("2026-11-04T12:00:00Z");
 
 function salvaged(fields: Partial<Salvaged> & Pick<Salvaged, "refname" | "saved_at">): Salvaged {
   return {
     commit: "0123456789abcdef0123456789abcdef01234567",
+    kind: "merged",
+    delete: `git reap salvaged --delete ${fields.refname}`,
     restore: `git -C ~/Development/app worktree add ~/Development/app-feat ${fields.refname} && git -C ~/Development/app-feat reset HEAD~1`,
     ...fields,
   };
@@ -55,5 +57,29 @@ describe("SalvagedSection", () => {
       "app",
     ]);
     expect(salvagedTitleOf(a)).toBe("a");
+  });
+
+  it("lists abandoned saves apart, with no expiry", async () => {
+    const merged = salvaged({ refname: "refs/reap/salvage/m/1", saved_at: "2026-11-01T00:00:00Z" });
+    const abandoned = salvaged({
+      refname: "refs/reap/salvage/idle/2",
+      kind: "abandoned",
+      branch: "docs/pages",
+      saved_at: "2026-11-02T12:00:00Z",
+    });
+    render(
+      <>
+        <SavedAbandonedSection repos={[repo([merged, abandoned])]} now={NOW} onDelete={() => {}} />
+        <SalvagedSection repos={[repo([merged, abandoned])]} now={NOW} />
+      </>,
+    );
+
+    await userEvent.setup().click(screen.getByRole("button", { name: /Saved abandoned work/ }));
+    expect(screen.getByRole("listitem", { name: "docs/pages" })).toBeInTheDocument();
+    expect(screen.getByText("Saved 2 d ago · kept until you delete it")).toBeInTheDocument();
+    expect(screen.queryByRole("listitem", { name: "m" })).not.toBeInTheDocument();
+    expect(salvagedEntriesOf([repo([merged, abandoned])], "merged").map((entry) => entry.salvaged.refname)).toEqual([
+      merged.refname,
+    ]);
   });
 });

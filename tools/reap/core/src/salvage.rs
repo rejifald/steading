@@ -1,6 +1,8 @@
 //! ADR dirty-merged-worktrees-are-salvaged: a merged worktree's uncommitted changes are saved as
 //! one commit under `refs/reap/salvage/` in the main clone and checked, so the worktree can then
-//! be removed with `--force`; and the listing and pruning of those refs.
+//! be removed with `--force`; and the listing and pruning of those refs. ADR 0006 saves an
+//! abandoned worktree the same way, with a `Reap-Reason: abandoned (…)` trailer, and such a save
+//! is never pruned: only the operator deletes it.
 //!
 //! The save never touches the worktree's own index: `git add -A` runs against a copy of it. It
 //! never uses `git stash`, which is one stack shared by every worktree of the clone.
@@ -8,14 +10,16 @@
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
 
 use crate::classify::Salvage;
+use crate::cli::UsageError;
 use crate::config::{Config, Policy, Repo};
 use crate::ctx::Ctx;
 use crate::git;
+use crate::lock;
 use crate::paths::Paths;
 use crate::report::shown_size;
 
@@ -25,6 +29,28 @@ pub const PREFIX: &str = "refs/reap/salvage/";
 const SUBJECT: &str = "git-reap salvage: ";
 /// What a save of a detached HEAD names as its branch.
 const DETACHED: &str = "detached HEAD";
+/// The trailer an abandoned worktree's save carries (ADR 0006 rule 7).
+const REASON_TRAILER: &str = "Reap-Reason";
+/// How that trailer's value starts.
+const ABANDONED: &str = "abandoned";
+
+/// Which worktree a save came from, which decides whether it expires.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    /// A merged worktree's uncommitted changes (ADR 0004): deleted after `salvage_max_age`.
+    Merged,
+    /// An abandoned worktree's whole state (ADR 0006): kept until the operator deletes it.
+    Abandoned,
+}
+
+/// What a save is for.
+pub(crate) enum Purpose<'a> {
+    /// A merged worktree past its dirty grace (ADR 0004).
+    Merged,
+    /// An abandoned worktree the operator confirmed, with its stale reason (ADR 0006).
+    Abandoned { stale: &'a str },
+}
 
 /// One save, as `git reap salvaged` and `status` list it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -32,6 +58,10 @@ pub struct Salvaged {
     /// `refs/reap/salvage/<folder>/<YYYYMMDD-HHMMSS>`.
     pub refname: String,
     pub commit: String,
+    pub kind: Kind,
+    /// The `Reap-Reason` trailer of an abandoned save: `abandoned (<stale reason>)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
     /// The worktree it was saved from, as its subject names it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub worktree: Option<String>,
@@ -39,11 +69,14 @@ pub struct Salvaged {
     pub branch: Option<String>,
     /// The save's commit date, RFC 3339.
     pub saved_at: String,
-    /// When a sweep deletes the ref, RFC 3339; under `policy = "auto"` only.
+    /// When a sweep deletes the ref, RFC 3339; under `policy = "auto"`, and for a merged save,
+    /// only.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub prunes_at: Option<String>,
     /// The commands that bring the changes back as uncommitted, in a new worktree.
     pub restore: String,
+    /// The command that deletes the save.
+    pub delete: String,
 }
 
 /// One listed repo's saves.
@@ -136,12 +169,13 @@ pub(crate) struct Source<'a> {
 }
 
 /// Saves the worktree's state as a commit under a new salvage ref in `repo`'s clone, and checks
-/// it (decision 3). Returns the ref, or `Ok(Err(why))` when a step or a check failed, in which
-/// case nothing may be removed.
+/// it (decision 3). A clean worktree gets a commit with HEAD's tree. Returns the ref, or
+/// `Ok(Err(why))` when a step or a check failed, in which case nothing may be removed.
 pub(crate) fn save(
     ctx: &Ctx,
     repo: &Repo,
     source: &Source,
+    purpose: &Purpose,
     now: DateTime<Utc>,
 ) -> Result<Result<String, String>> {
     let paths = &ctx.paths;
@@ -152,16 +186,18 @@ pub(crate) fn save(
     );
     let stamp = now.with_timezone(&chrono::Local).format("%Y%m%d-%H%M%S");
     let refname = format!("{PREFIX}{}/{stamp}", ref_component(&folder));
-    // The guards again: the inspection is seconds old.
+    // The guards again: the inspection is seconds old. An abandoned worktree has no dirty
+    // grace: the operator's confirmation is what lets it go (ADR 0006 rule 6).
     match check(paths, &worktree, repo.salvage_max_untracked, None) {
         Salvage::Held(why) => return Ok(Err(why)),
-        Salvage::Ready { last_change } => {
+        Salvage::Ready { last_change } if matches!(purpose, Purpose::Merged) => {
             let grace =
                 chrono::Duration::from_std(repo.dirty_grace).unwrap_or(chrono::Duration::MAX);
             if now < last_change + grace {
                 return Ok(Err("it changed since reap looked at it".into()));
             }
         }
+        Salvage::Ready { .. } => {}
     }
     let index = git::path_of(
         &paths.git,
@@ -172,13 +208,23 @@ pub(crate) fn save(
     let with_copy = [("GIT_INDEX_FILE", copy.path.as_os_str())];
     let branch = source.branch.unwrap_or(DETACHED);
     let subject = format!("{SUBJECT}{} ({branch})", source.key);
+    let (state, trailer) = match purpose {
+        Purpose::Merged => ("Uncommitted state", None),
+        Purpose::Abandoned { stale } => (
+            "State",
+            Some(format!("{REASON_TRAILER}: {ABANDONED} ({stale})")),
+        ),
+    };
+    let mut messages = vec!["-m", subject.as_str()];
+    if let Some(trailer) = &trailer {
+        messages.extend(["-m", trailer.as_str()]);
+    }
     if ctx.dry_run {
         ctx.write_output_with(&worktree, &["add", "-A"], &with_copy)?;
         ctx.write_output_with(&worktree, &["write-tree"], &with_copy)?;
-        ctx.write_output(
-            &worktree,
-            &["commit-tree", "<tree>", "-p", source.head, "-m", &subject],
-        )?;
+        let mut args = vec!["commit-tree", "<tree>", "-p", source.head];
+        args.extend(&messages);
+        ctx.write_output(&worktree, &args)?;
         ctx.write_output(&repo.path, &["update-ref", &refname, "<commit>", "''"])?;
         return Ok(Ok(refname));
     }
@@ -190,7 +236,7 @@ pub(crate) fn save(
         Err(why) => return Ok(Err(why)),
     };
     let body = format!(
-        "Uncommitted state of the worktree before removal on {stamp}.\n\nHEAD: {}",
+        "{state} of the worktree before removal on {stamp}.\n\nHEAD: {}",
         source.head
     );
     let date = format!("@{} +0000", now.timestamp());
@@ -198,20 +244,21 @@ pub(crate) fn save(
         ("GIT_AUTHOR_DATE", OsStr::new(&date)),
         ("GIT_COMMITTER_DATE", OsStr::new(&date)),
     ];
-    let commit = step(ctx.write_output_with(
-        &worktree,
-        &[
-            "commit-tree",
-            &tree,
-            "-p",
-            source.head,
-            "-m",
-            &subject,
-            "-m",
-            &body,
-        ],
-        &dated,
-    )?);
+    let mut args = vec![
+        "commit-tree",
+        tree.as_str(),
+        "-p",
+        source.head,
+        "-m",
+        subject.as_str(),
+        "-m",
+        body.as_str(),
+    ];
+    // The trailer goes last, in its own paragraph, so git reads it as a trailer.
+    if let Some(trailer) = &trailer {
+        args.extend(["-m", trailer.as_str()]);
+    }
+    let commit = step(ctx.write_output_with(&worktree, &args, &dated)?);
     let commit = match commit {
         Ok(commit) => commit,
         Err(why) => return Ok(Err(why)),
@@ -323,15 +370,14 @@ fn ref_component(name: &str) -> String {
 
 /// Every salvage ref in `repo`'s clone, oldest first, with its commit date.
 pub(crate) fn list(paths: &Paths, repo: &Repo) -> Result<Vec<(Salvaged, DateTime<Utc>)>> {
+    let format = format!(
+        "--format=%(refname)%00%(objectname)%00%(committerdate:unix)%00%(contents:subject)%00\
+         %(trailers:key={REASON_TRAILER},valueonly,separator=%x20)"
+    );
     let output = git::run(
         &paths.git,
         &repo.path,
-        &[
-            "for-each-ref",
-            "--sort=committerdate",
-            "--format=%(refname)%00%(objectname)%00%(committerdate:unix)%00%(contents:subject)",
-            PREFIX,
-        ],
+        &["for-each-ref", "--sort=committerdate", &format, PREFIX],
     )?;
     let max_age = chrono::Duration::from_std(repo.salvage_max_age).unwrap_or(chrono::Duration::MAX);
     Ok(output
@@ -344,17 +390,34 @@ pub(crate) fn list(paths: &Paths, repo: &Repo) -> Result<Vec<(Salvaged, DateTime
                 fields.next()?,
                 fields.next()?,
             );
+            let reason = fields
+                .next()
+                .map(str::trim)
+                .filter(|reason| !reason.is_empty())
+                .map(str::to_string);
+            let kind = if reason
+                .as_deref()
+                .is_some_and(|reason| reason.starts_with(ABANDONED))
+            {
+                Kind::Abandoned
+            } else {
+                Kind::Merged
+            };
             let saved_at = DateTime::from_timestamp(date.parse().ok()?, 0)?;
             let (worktree, branch) = parse_subject(subject);
             let restore = restore(paths, repo, refname, worktree.as_deref());
             let salvaged = Salvaged {
                 refname: refname.to_string(),
                 commit: commit.to_string(),
+                kind,
+                reason: reason.filter(|_| kind == Kind::Abandoned),
                 worktree,
                 branch,
                 saved_at: rfc3339(saved_at),
-                prunes_at: (repo.policy == Policy::Auto).then(|| rfc3339(saved_at + max_age)),
+                prunes_at: (repo.policy == Policy::Auto && kind == Kind::Merged)
+                    .then(|| rfc3339(saved_at + max_age)),
                 restore,
+                delete: format!("git reap salvaged --delete {}", quoted(refname)),
             };
             Some((salvaged, saved_at))
         })
@@ -419,7 +482,8 @@ fn quoted(path: &str) -> String {
 }
 
 /// Decision 4: deletes the salvage refs older than `salvage_max_age`, only under `policy =
-/// "auto"`. Returns the refs deleted (or, in a dry run, that would be).
+/// "auto"`, and never an abandoned worktree's save (ADR 0006 rule 8). Returns the refs deleted
+/// (or, in a dry run, that would be).
 pub(crate) fn prune(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>) -> Result<Vec<String>> {
     if repo.policy != Policy::Auto {
         return Ok(Vec::new());
@@ -427,7 +491,7 @@ pub(crate) fn prune(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>) -> Result<Vec<St
     let max_age = chrono::Duration::from_std(repo.salvage_max_age).unwrap_or(chrono::Duration::MAX);
     let mut pruned = Vec::new();
     for (salvaged, saved_at) in list(&ctx.paths, repo)? {
-        if now < saved_at + max_age {
+        if salvaged.kind == Kind::Abandoned || now < saved_at + max_age {
             continue;
         }
         // The old value makes git refuse if the ref moved since it was listed.
@@ -445,6 +509,47 @@ pub(crate) fn prune(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>) -> Result<Vec<St
         }
     }
     Ok(pruned)
+}
+
+/// `git reap salvaged --delete <ref>`: deletes one save, in the listed repo `selector` names or
+/// else the one listed repo whose clone has it. Only a ref under `refs/reap/salvage/` is
+/// deleted, under the clone's lock, and only if it still points where it did when it was read.
+/// Returns the repo, as shown.
+///
+/// # Errors
+///
+/// Fails when the ref is not a save, no listed repo (or several) has it, the repo is busy, or
+/// git refuses.
+pub fn delete(ctx: &Ctx, selector: Option<&str>, refname: &str) -> Result<String> {
+    let paths = &ctx.paths;
+    if !refname.starts_with(PREFIX) || refname.len() == PREFIX.len() {
+        bail!(UsageError(format!(
+            "{refname} is not a save under {PREFIX}"
+        )));
+    }
+    let holding: Vec<(Repo, String)> = Config::load(paths)?
+        .repos(paths)?
+        .into_iter()
+        .filter(|repo| selector.is_none_or(|selector| repo.matches(selector, paths)))
+        .filter_map(|repo| {
+            let commit = git::resolve(&paths.git, &repo.path, refname)?;
+            Some((repo, commit))
+        })
+        .collect();
+    let (repo, commit) = match <[_; 1]>::try_from(holding) {
+        Ok([only]) => only,
+        Err(holding) if holding.is_empty() => {
+            bail!(UsageError(format!("no listed repo has {refname}")))
+        }
+        Err(_) => bail!(UsageError(format!(
+            "{refname} is in several listed repos; name one with --repo"
+        ))),
+    };
+    let common_dir = git::path_of(&paths.git, &repo.path, &["rev-parse", "--git-common-dir"])?;
+    let _lock = lock::acquire(&common_dir, std::time::Duration::from_secs(10))?
+        .map_err(|why| anyhow::anyhow!("{} is busy: {why}", paths.tilde(&repo.path)))?;
+    ctx.write(&repo.path, &["update-ref", "-d", refname, &commit])?;
+    Ok(paths.tilde(&repo.path))
 }
 
 /// `git reap salvaged`: the saves of every listed repo.
@@ -474,7 +579,8 @@ pub fn salvaged(paths: &Paths) -> Result<Vec<RepoSalvaged>> {
         .collect())
 }
 
-/// Human-readable `salvaged`.
+/// Human-readable `salvaged`: per repo, the saves of abandoned worktrees, then those of merged
+/// ones.
 #[must_use]
 pub fn render(repos: &[RepoSalvaged]) -> String {
     let mut lines = Vec::new();
@@ -486,7 +592,7 @@ pub fn render(repos: &[RepoSalvaged]) -> String {
         if repo.error.is_none() && repo.salvaged.is_empty() {
             lines.push("  nothing salvaged".into());
         }
-        lines.extend(repo.salvaged.iter().flat_map(describe));
+        lines.extend(described_apart(&repo.salvaged));
     }
     if repos.is_empty() {
         lines.push("no repos listed; add a main clone with `git reap add <path>`".into());
@@ -496,7 +602,27 @@ pub fn render(repos: &[RepoSalvaged]) -> String {
     text
 }
 
-/// One save in three lines: the ref, what it came from and when, and how to restore it.
+/// Every save, the abandoned ones first and apart from the merged ones (ADR 0006 rule 8).
+pub(crate) fn described_apart(salvaged: &[Salvaged]) -> Vec<String> {
+    let of = |kind| {
+        salvaged
+            .iter()
+            .filter(move |salvaged| salvaged.kind == kind)
+    };
+    let mut lines = Vec::new();
+    if of(Kind::Abandoned).next().is_some() {
+        lines.push("  abandoned worktrees, kept until you delete them:".into());
+        lines.extend(of(Kind::Abandoned).flat_map(describe));
+    }
+    if of(Kind::Merged).next().is_some() && of(Kind::Abandoned).next().is_some() {
+        lines.push("  changes of merged worktrees:".into());
+    }
+    lines.extend(of(Kind::Merged).flat_map(describe));
+    lines
+}
+
+/// One save in three lines (four for an abandoned one): the ref, what it came from and when,
+/// how to restore it, and how to delete an abandoned one.
 pub(crate) fn describe(salvaged: &Salvaged) -> Vec<String> {
     let local = |time: &str| {
         DateTime::parse_from_rfc3339(time).map_or_else(
@@ -513,19 +639,26 @@ pub(crate) fn describe(salvaged: &Salvaged) -> Vec<String> {
         (Some(worktree), None) => format!("{worktree}, "),
         (None, _) => String::new(),
     };
-    let prunes = salvaged
-        .prunes_at
-        .as_deref()
-        .map(|time| format!("; deleted after {}", local(time)))
-        .unwrap_or_default();
-    vec![
+    let prunes = match (&salvaged.prunes_at, salvaged.kind) {
+        (_, Kind::Abandoned) => "; kept until you delete it".to_string(),
+        (Some(time), Kind::Merged) => format!("; deleted after {}", local(time)),
+        (None, Kind::Merged) => String::new(),
+    };
+    let mut lines = vec![
         format!("  salvaged   {}", salvaged.refname),
         format!(
             "             {from}saved {}{prunes}",
             local(&salvaged.saved_at)
         ),
-        format!("             restore: {}", salvaged.restore),
-    ]
+    ];
+    if let Some(reason) = &salvaged.reason {
+        lines.push(format!("             {reason}"));
+    }
+    lines.push(format!("             restore: {}", salvaged.restore));
+    if salvaged.kind == Kind::Abandoned {
+        lines.push(format!("             delete:  {}", salvaged.delete));
+    }
+    lines
 }
 
 fn rfc3339(time: DateTime<Utc>) -> String {

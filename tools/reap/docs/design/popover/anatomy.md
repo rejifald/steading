@@ -120,7 +120,7 @@ visual reference, mapped onto reap's states below.
 
 ### `outcomeOf(state)`
 
-`stale`, `refused` → `needs-you`; `removable`, `missing` → `ready`; `dirty`, `in-use`, `locked` →
+`stale`, `abandoned`, `refused` → `needs-you`; `removable`, `missing` → `ready`; `dirty`, `in-use`, `locked` →
 `held`; `open` → `in-progress`; `kept` → `kept`. Section order: needs-you, ready, held,
 in-progress, kept. Within a section: repo order as reported, then worktree order as reported.
 
@@ -128,12 +128,16 @@ in-progress, kept. Within a section: repo order as reported, then worktree order
 
 Line 2 of a row. Sentence case (first letter upper-cased).
 
-- `removable` with `pr.state === "merged"`: `Merged in #<n>`; otherwise the reason
+- `removable` with `pr.state === "merged"`: `Merged in #<n>`, or `In #<n>, merged` when
+  `pr.by_commit` (ADR 0006 rule 3(d)); otherwise the reason
   (`Merged into origin/main`). Then, when `removes_at` is set, ` · removes <inTime>`
   (`· removes in 3 h`); when `repo.policy === "off"`, ` · auto-removal is off`.
 - `missing`: `Folder is already gone. A sweep clears git's record.`
-- `stale`: the reason, then ` reap won't remove it.` (`Pull request #35 closed without merging.
-  reap won't remove it.`)
+- `stale`: what is local, then, when `held_by` names a guard, ` reap won’t remove it: <guard>.`
+  (`No commit or checkout for 119 days · pull request #15 open. reap won’t remove it: a merge is
+  in progress.`); with no guard, the reason alone (ADR 0006 rule 9).
+- `abandoned`: the reason, which names everything local (`No commit or checkout for 119 days ·
+  13 uncommitted changes · 22 commits on no remote`).
 - every other state: the reason, sentence-cased (`Merged into origin/main, but a process is
   running inside it`).
 
@@ -175,8 +179,9 @@ Two lines, `px-4 py-1.5`, `gap-0.5`, `<li>`, hover/focus-within `bg-surface-hove
   actions (icon buttons, hidden until hover or focus-within, as today); then the meta
   `<repo> · <age>` in `shrink-0 text-xs text-faint` (age omitted when unknown: `docs-site`).
 - Line 2: `sentenceOf()` in `text-xs text-muted`, `truncate`. With `emphasis` (Needs you): in
-  `text-needs-you`, wrapping, and the text buttons below it (`Try again` and `Keep` for refused, `Open in
-  Finder`), `pt-1`.
+  `text-needs-you`, wrapping, and the text buttons below it (`Save and remove` and `Keep` for
+  abandoned, `Try again` and `Keep` for refused, `Open in Finder`), `pt-1`. `Try again` on a
+  refused row with `local` retries the save, not a plain removal.
 - Actions by state: removable/missing → Remove now, Keep (not for missing), Open in Finder;
   held states → Keep, Open; kept → Unkeep, Open; open → Open. Same `IconButton`s and labels as
   today.

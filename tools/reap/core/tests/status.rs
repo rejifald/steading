@@ -248,7 +248,7 @@ fn a_worktree_merged_into_its_pull_requests_target_counts_as_merged() {
 }
 
 #[test]
-fn a_pull_request_closed_without_merging_is_stale() {
+fn a_pull_request_closed_without_merging_is_abandoned_with_its_local_commit() {
     let mut sandbox = Sandbox::new();
     let abandoned = sandbox.worktree("abandoned");
     let head = commit(&abandoned, "idea");
@@ -262,11 +262,12 @@ fn a_pull_request_closed_without_merging_is_stale() {
 
     assert_eq!(report.overall, Overall::NeedsYou);
     let repo = &report.repos[0];
-    assert_eq!(row(repo, "abandoned").state, State::Stale);
+    assert_eq!(row(repo, "abandoned").state, State::Abandoned);
     assert_eq!(
         row(repo, "abandoned").reason,
-        "pull request #5 closed without merging"
+        "pull request #5 closed without merging · 1 commit on no remote"
     );
+    assert_eq!(row(repo, "abandoned").local, ["1 commit on no remote"]);
 }
 
 #[test]
@@ -381,6 +382,15 @@ fn a_stale_worktree_is_removable_only_when_every_commit_is_pushed() {
         "{}",
         row(&repo, "pushed").reason
     );
-    assert_eq!(row(&repo, "local").state, State::Stale);
-    assert_eq!(row(&repo, "dirty").state, State::Stale);
+    // Something local: offered as abandoned, never removed by a sweep (ADR 0006).
+    assert_eq!(row(&repo, "local").state, State::Abandoned);
+    assert_eq!(
+        row(&repo, "local").reason,
+        "no commit or checkout for 21 days · 1 commit on no remote"
+    );
+    assert_eq!(row(&repo, "dirty").state, State::Abandoned);
+    assert_eq!(
+        row(&repo, "dirty").reason,
+        "no commit or checkout for 21 days · 1 uncommitted change"
+    );
 }

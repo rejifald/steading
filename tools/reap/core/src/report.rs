@@ -1,8 +1,10 @@
 //! `git reap status` and the popover's rows: every linked worktree of every listed repo with
 //! its pull request and reap state. Read-only and offline except for the `gh` calls of rule 9
-//! (ADR 0002): it judges against the remote-tracking refs as they are, so a stale ref can only
-//! make a worktree look unmerged, never merged (rule 8).
+//! (ADRs 0002 and 0006): it judges against the remote-tracking refs as they are, so a stale ref
+//! can only make a worktree look unmerged, never merged (rule 8).
 
+use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
@@ -34,12 +36,16 @@ const OPERATIONS: &[(&str, &str)] = &[
     ("BISECT_LOG", "bisect"),
 ];
 
-/// The pull request a worktree's branch belongs to, as shown.
+/// The pull request a worktree's branch belongs to, or the merged one that contains its HEAD
+/// (ADR 0006), as shown.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PullRequestSummary {
     pub number: u64,
     pub state: PullRequestState,
     pub url: String,
+    /// Found by HEAD's commit rather than by the branch's name (rule 3(d)): `in #212, merged`.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub by_commit: bool,
 }
 
 /// One linked worktree.
@@ -73,6 +79,14 @@ pub struct Row {
     /// The disk space removing it would free; absent when the folder is gone or unreadable.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// What exists only in this stale worktree, each as shown (ADR 0006 rule 9); also part of
+    /// `reason`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub local: Vec<String>,
+    /// The guard that holds a stale worktree, as it follows "reap won't remove it:"; also the
+    /// end of `reason` (ADR 0006 rule 9).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub held_by: Option<String>,
 }
 
 /// One listed repo and its linked worktrees (never the main clone).
@@ -122,7 +136,8 @@ pub struct Report {
     pub overall: Overall,
     /// Removable worktrees and missing entries waiting for a prune.
     pub removable: usize,
-    /// Stale worktrees, repos that cannot be read, and low volumes reap can free nothing on.
+    /// Stale and abandoned worktrees, refusals, repos that cannot be read, and low volumes reap
+    /// can free nothing on.
     pub needs_you: usize,
     pub repos: Vec<RepoReport>,
     /// Every volume that holds a listed repo's worktrees (ADR low-disk-skips-the-grace).
@@ -180,7 +195,7 @@ pub fn summarize(paths: &Paths, repos: Vec<RepoReport>, volumes: Vec<VolumeStatu
         .filter(|row| matches!(row.state, State::Removable | State::Missing))
         .count();
     let needs_you = rows()
-        .filter(|row| matches!(row.state, State::Stale | State::Refused))
+        .filter(|row| matches!(row.state, State::Stale | State::Abandoned | State::Refused))
         .count()
         + repos.iter().filter(|repo| repo.error.is_some()).count()
         + volumes
@@ -224,9 +239,46 @@ pub(crate) struct Prepared {
     pub gh_note: Option<String>,
     /// `owner/name` when the remote is on GitHub and `gh` answered.
     pub github_repo: Option<String>,
+    /// The pull requests associated with each HEAD asked about so far in this pass (ADR 0006),
+    /// so a pass that looks twice asks GitHub once.
+    associated: RefCell<BTreeMap<String, Vec<PullRequest>>>,
 }
 
 impl Prepared {
+    /// The pull requests GitHub associates with each of `heads` (rule 3(d)), asking only for the
+    /// ones this pass has not asked about yet; empty when the remote is not on GitHub or `gh`
+    /// did not answer.
+    fn associated(
+        &self,
+        paths: &Paths,
+        repo: &Repo,
+        heads: &[String],
+    ) -> BTreeMap<String, Vec<PullRequest>> {
+        let Some(github_repo) = &self.github_repo else {
+            return BTreeMap::new();
+        };
+        let mut cache = self.associated.borrow_mut();
+        let mut asking: Vec<String> = heads
+            .iter()
+            .filter(|head| !cache.contains_key(*head))
+            .cloned()
+            .collect();
+        asking.sort();
+        asking.dedup();
+        if !asking.is_empty() {
+            cache.extend(github::associated(
+                &paths.gh,
+                &repo.path,
+                github_repo,
+                &asking,
+            ));
+        }
+        heads
+            .iter()
+            .filter_map(|head| Some((head.clone(), cache.get(head)?.clone())))
+            .collect()
+    }
+
     /// The base branch's name on the remote.
     pub fn base_branch<'a>(&'a self, repo: &Repo) -> &'a str {
         let prefix = format!("refs/remotes/{}/", repo.remote);
@@ -253,6 +305,7 @@ pub(crate) fn prepare(paths: &Paths, repo: &Repo) -> Result<Prepared> {
         gh_note: None,
         pull_requests: Vec::new(),
         github_repo: None,
+        associated: RefCell::default(),
         base_ref,
     };
     match (listed, github_repo) {
@@ -372,8 +425,24 @@ pub(crate) fn inspect(
         .skip(1)
         .filter(|worktree| !worktree.is_bare)
         .collect();
-    let (rows, inspected): (Vec<Row>, Vec<Inspected>) =
-        linked.iter().map(|worktree| pass.row(worktree)).unzip();
+    let mut firsts: Vec<First> = linked.iter().map(|worktree| pass.first(worktree)).collect();
+    // Rule 3(d): one lookup for every HEAD that (a) to (c) left unmerged.
+    let unmerged: Vec<String> = firsts
+        .iter()
+        .filter(|first| !first.is_missing && first.merge.is_none())
+        .filter_map(|first| first.head.clone())
+        .collect();
+    if !unmerged.is_empty() {
+        let associated = prepared.associated(paths, repo, &unmerged);
+        for first in &mut firsts {
+            pass.merge_by_commit(first, &associated);
+        }
+    }
+    let (rows, inspected): (Vec<Row>, Vec<Inspected>) = linked
+        .iter()
+        .zip(firsts)
+        .map(|(worktree, first)| pass.row(worktree, first))
+        .unzip();
     let salvaged = salvage::list(paths, repo)?
         .into_iter()
         .map(|(salvaged, _)| salvaged)
@@ -428,6 +497,18 @@ pub(crate) fn list_worktrees(paths: &Paths, repo: &Path) -> Result<Vec<Worktree>
     Ok(worktree_list::parse(&output)?)
 }
 
+/// What a pass knows about a worktree before it asks GitHub about the HEADs still unmerged.
+struct First {
+    branch: Option<String>,
+    head: Option<String>,
+    is_missing: bool,
+    /// Its branch's pull request (rule 9), or the merged one found by HEAD's commit (ADR 0006).
+    pull_request: Option<PullRequest>,
+    /// `pull_request` was found by HEAD's commit, not by the branch.
+    by_commit: bool,
+    merge: Option<Merge>,
+}
+
 /// Everything one repo's rows share.
 struct Pass<'a> {
     paths: &'a Paths,
@@ -441,7 +522,8 @@ struct Pass<'a> {
 }
 
 impl Pass<'_> {
-    fn row(&self, worktree: &Worktree) -> (Row, Inspected) {
+    /// The branch, HEAD, the branch's pull request and rule 3's clauses (a) to (c).
+    fn first(&self, worktree: &Worktree) -> First {
         let branch = worktree.branch.as_deref().map(|branch| {
             branch
                 .strip_prefix("refs/heads/")
@@ -449,11 +531,59 @@ impl Pass<'_> {
                 .to_string()
         });
         let head = worktree.head.clone();
-        let key = self.paths.tilde(&worktree.path);
+        let is_missing = worktree.prunable_reason.is_some() || !worktree.path.is_dir();
         let pull_request = branch
             .as_deref()
-            .and_then(|branch| self.pull_request_of(branch, head.as_deref()));
-        let mut facts = self.facts(worktree, head.as_deref(), branch.as_deref(), pull_request);
+            .and_then(|branch| self.pull_request_of(branch, head.as_deref()))
+            .cloned();
+        let merge = if is_missing {
+            None
+        } else {
+            head.as_deref()
+                .and_then(|head| self.merge_of(head, branch.as_deref(), pull_request.as_ref()))
+        };
+        First {
+            branch,
+            head,
+            is_missing,
+            pull_request,
+            by_commit: false,
+            merge,
+        }
+    }
+
+    /// Rule 3(d), ADR 0006: a merged pull request associated with HEAD, whatever its branch,
+    /// whose merged head contains HEAD (ADR 0002 rule 1's check).
+    fn merge_by_commit(&self, first: &mut First, associated: &BTreeMap<String, Vec<PullRequest>>) {
+        if first.is_missing || first.merge.is_some() {
+            return;
+        }
+        let Some(head) = first.head.as_deref() else {
+            return;
+        };
+        let found = associated
+            .get(head)
+            .into_iter()
+            .flatten()
+            .filter(|pull_request| pull_request.state == PullRequestState::Merged)
+            .find(|pull_request| self.is_contained(head, &pull_request.head_ref_oid));
+        if let Some(pull_request) = found {
+            first.merge = Some(Merge::Commit(pull_request.number));
+            first.pull_request = Some(pull_request.clone());
+            first.by_commit = true;
+        }
+    }
+
+    fn row(&self, worktree: &Worktree, first: First) -> (Row, Inspected) {
+        let key = self.paths.tilde(&worktree.path);
+        let mut facts = self.facts(worktree, &first);
+        let First {
+            branch,
+            head,
+            pull_request,
+            by_commit,
+            ..
+        } = first;
         if let Some(head) = head.as_deref() {
             facts.is_kept = self.memory.is_kept(&key, head);
             facts.refusal = self
@@ -491,7 +621,8 @@ impl Pass<'_> {
             pr: pull_request.map(|pull_request| PullRequestSummary {
                 number: pull_request.number,
                 state: pull_request.state,
-                url: pull_request.url.clone(),
+                url: pull_request.url,
+                by_commit,
             }),
             state,
             reason,
@@ -499,6 +630,10 @@ impl Pass<'_> {
             removes_at: removes_at.map(rfc3339),
             saves_at: saves_at.map(rfc3339),
             size_bytes: None,
+            local: facts.local.clone(),
+            held_by: (state == State::Stale)
+                .then(|| classify::guard_of(&facts))
+                .flatten(),
         };
         let inspected = Inspected {
             key,
@@ -526,22 +661,19 @@ impl Pass<'_> {
             .or_else(|| candidates().next())
     }
 
-    fn facts(
-        &self,
-        worktree: &Worktree,
-        head: Option<&str>,
-        branch: Option<&str>,
-        pull_request: Option<&PullRequest>,
-    ) -> Facts {
-        let is_missing = worktree.prunable_reason.is_some() || !worktree.path.is_dir();
+    fn facts(&self, worktree: &Worktree, first: &First) -> Facts {
         let mut facts = Facts {
-            is_missing,
+            is_missing: first.is_missing,
             lock_reason: worktree.lock_reason.clone(),
             ..Facts::default()
         };
-        if is_missing {
+        if first.is_missing {
             return facts;
         }
+        let head = first.head.as_deref();
+        let branch = first.branch.as_deref();
+        // Open and closed count only for the branch's own pull request.
+        let pull_request = first.pull_request.as_ref().filter(|_| !first.by_commit);
         let state = pull_request.map(|pull_request| pull_request.state);
         facts.closed_pull_request = pull_request
             .filter(|_| state == Some(PullRequestState::Closed))
@@ -550,13 +682,14 @@ impl Pass<'_> {
             .filter(|_| state == Some(PullRequestState::Open))
             .map(|pull_request| pull_request.number);
         facts.last_activity = self.last_activity(&worktree.path);
-        facts.merge = head.and_then(|head| self.merge_of(head, branch, pull_request));
+        facts.merge.clone_from(&first.merge);
         if facts.merge.is_none() && facts.open_pull_request.is_none() && branch.is_some() {
             facts.pushed_to = head
                 .filter(|head| self.is_pushed(head))
                 .map(|_| self.repo.remote.clone());
         }
-        if facts.merge.is_some() || facts.pushed_to.is_some() {
+        let is_stale = classify::stale_reason(&facts, self.repo.stale_after, self.now).is_some();
+        if facts.merge.is_some() || facts.pushed_to.is_some() || is_stale {
             facts.dirt = self.dirt_of(&worktree.path);
             facts.in_use = match self.directories {
                 Ok(directories) if directories.is_inside(&worktree.path) => InUse::Yes,
@@ -564,7 +697,7 @@ impl Pass<'_> {
                 Err(why) => InUse::Unknown(why.clone()),
             };
         }
-        if facts.merge.is_some() && facts.dirt == Some(Dirt::Changes) {
+        if (facts.merge.is_some() || is_stale) && facts.dirt == Some(Dirt::Changes) {
             facts.salvage = Some(salvage::check(
                 self.paths,
                 &worktree.path,
@@ -572,7 +705,72 @@ impl Pass<'_> {
                 facts.last_activity,
             ));
         }
+        if is_stale {
+            facts.local = self.local_of(&worktree.path, head, branch, &facts);
+        }
         facts
+    }
+
+    /// ADR 0006 rules 4 and 9: what exists only in a stale worktree, in the order its line names
+    /// it: uncommitted changes, commits on no remote, a detached HEAD, an open pull request.
+    fn local_of(
+        &self,
+        worktree: &Path,
+        head: Option<&str>,
+        branch: Option<&str>,
+        facts: &Facts,
+    ) -> Vec<String> {
+        let mut local = Vec::new();
+        if facts.dirt.is_some() {
+            let status = git::run(
+                &self.paths.git,
+                worktree,
+                &["status", "--porcelain", "--untracked-files=normal"],
+            );
+            match status.map(|status| status.lines().filter(|line| !line.is_empty()).count()) {
+                Ok(0) => {}
+                Ok(count) => {
+                    local.push(counted(count, "uncommitted change", "uncommitted changes"));
+                }
+                Err(_) => local.push("uncommitted changes".into()),
+            }
+        }
+        if let Some(head) = head {
+            let not_on = |refs: &str| {
+                git::run(
+                    &self.paths.git,
+                    &self.repo.path,
+                    &["rev-list", "--count", head, "--not", refs],
+                )
+                .ok()
+                .and_then(|count| count.trim().parse::<usize>().ok())
+            };
+            let remote = &self.repo.remote;
+            match not_on("--remotes") {
+                Some(0) => {
+                    if let Some(count) = not_on(&format!("--remotes={remote}")).filter(|n| *n > 0) {
+                        local.push(counted(
+                            count,
+                            &format!("commit not on {remote}"),
+                            &format!("commits not on {remote}"),
+                        ));
+                    }
+                }
+                Some(count) => local.push(counted(
+                    count,
+                    "commit on no remote",
+                    "commits on no remote",
+                )),
+                None => local.push("commits that could not be checked against a remote".into()),
+            }
+        }
+        if branch.is_none() {
+            local.push("a detached HEAD".into());
+        }
+        if let Some(number) = facts.open_pull_request {
+            local.push(format!("pull request #{number} open"));
+        }
+        local
     }
 
     /// Rule 3, clauses (a), (c) and (b) in that order.
@@ -693,6 +891,15 @@ fn rfc3339(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
+/// "1 commit", "22 commits".
+fn counted(count: usize, one: &str, many: &str) -> String {
+    if count == 1 {
+        format!("1 {one}")
+    } else {
+        format!("{count} {many}")
+    }
+}
+
 /// Human-readable `status`.
 #[must_use]
 pub fn render(report: &Report) -> String {
@@ -759,10 +966,8 @@ pub fn render(report: &Report) -> String {
                 row.reason
             );
         }
-        for salvaged in &repo.salvaged {
-            for line in salvage::describe(salvaged) {
-                let _ = writeln!(out, "{line}");
-            }
+        for line in salvage::described_apart(&repo.salvaged) {
+            let _ = writeln!(out, "{line}");
         }
     }
     out
@@ -818,6 +1023,10 @@ fn sizes_line(report: &Report) -> Option<String> {
     let parts: Vec<String> = [
         (total_of(&[State::Removable]), "removable"),
         (total_of(&[State::Dirty]), "held by uncommitted changes"),
+        (
+            total_of(&[State::Abandoned]),
+            "abandoned, to save and remove",
+        ),
     ]
     .into_iter()
     .filter(|(bytes, _)| *bytes > 0)
