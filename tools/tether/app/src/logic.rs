@@ -176,6 +176,13 @@ pub fn reopens(hidden_at: Option<Instant>, now: Instant, guard: Duration) -> boo
     hidden_at.is_none_or(|t| now.saturating_duration_since(t) >= guard)
 }
 
+/// The root a scan walks after `left`, which is what the popover shows as "looking in…";
+/// `None` after the last one (or for a root that is not in the list), when the scan is done.
+pub fn root_after(roots: &[String], left: &str) -> Option<String> {
+    let at = roots.iter().position(|r| r == left)?;
+    roots.get(at + 1).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,5 +402,20 @@ mod tests {
         assert!(reopens(None, t, guard));
         assert!(!reopens(Some(t), t + Duration::from_millis(100), guard));
         assert!(reopens(Some(t), t + Duration::from_millis(400), guard));
+    }
+
+    #[test]
+    fn the_scan_moves_to_the_root_after_the_one_just_left() {
+        let roots: Vec<String> = ["~/Development", "~/Code", "~/Projects"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            root_after(&roots, "~/Development").as_deref(),
+            Some("~/Code")
+        );
+        assert_eq!(root_after(&roots, "~/Code").as_deref(), Some("~/Projects"));
+        assert_eq!(root_after(&roots, "~/Projects"), None);
+        assert_eq!(root_after(&roots, "~/Elsewhere"), None);
+        assert_eq!(root_after(&[], "~/Code"), None);
     }
 }

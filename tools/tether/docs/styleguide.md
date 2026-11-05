@@ -121,9 +121,15 @@ list, in the order of `repos.toml`, with their reason in full.
 
 - English, sentence case, short. Buttons are verbs: *Sync now*, *Add repository*, *Pause*.
 - Use the CLI's own words for states and reasons, so the UI and `git tether status` read alike.
-- An empty list shows what a listed repo looks like (ghost rows), says what tether does —
-  "tether keeps each clone you list on its branch, pulling in the background." — and offers
-  *Add repository*.
+- An empty list before any scan shows what a suggestion looks like (a faded box of two example
+  rows with an *Add* pill), says what tether does — "tether keeps each clone you list on its
+  branch. Find the clones on this Mac, or add one by hand." — and offers *Add repository* and
+  *Find clones*, then "Looks in ~/Development and ~/Code." with the underlined *Where to look…*
+  (one root: as is; three or more: "~/Development, ~/Code and 2 more"; none: "Looks nowhere
+  yet."). After a scan with nothing left to suggest it says "No clones in ~/Development or
+  ~/Code. Look somewhere else, or add one by hand." with *Where to look…* and *Add repository*,
+  and a quiet line "Looked just now" (plus " · stopped early in <root> after 20 000 folders"
+  when a root hit its cap). See [clone discovery](../../../docs/design/discovery/anatomy.md).
 - Paths show with `~`, as the CLI prints them.
 
 ## Accessibility

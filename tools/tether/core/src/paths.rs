@@ -65,6 +65,13 @@ impl Paths {
         self.config.join("state.json")
     }
 
+    /// What the last `discover` found (repository ADR 0004 rule 10). Its own file, never a key in
+    /// `state.json`, whose loader would drop every record over a key it does not know.
+    #[must_use]
+    pub fn discovery_file(&self) -> PathBuf {
+        self.config.join("discovery.json")
+    }
+
     /// Rule 9: `backups/<repo>/<timestamp>.diff`.
     #[must_use]
     pub fn backups(&self, repo_name: &str) -> PathBuf {

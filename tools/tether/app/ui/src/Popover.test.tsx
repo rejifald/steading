@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Row, Snapshot, TetherApi } from "./api";
-import { createFakeApi, sampleRows } from "./api.fake";
+import { createFakeApi, noDiscovery, sampleRows } from "./api.fake";
 import { Popover } from "./Popover";
 
 function setup(options: Parameters<typeof createFakeApi>[0] = {}) {
@@ -54,11 +54,14 @@ describe("Popover", () => {
     expect(sync).toHaveBeenCalledWith("~/Development/example-site");
   });
 
-  it("offers to add a repository when nothing is listed, with only Pause in the footer", async () => {
+  it("offers to find or add a repository when nothing is listed, with only Pause in the footer", async () => {
     const { user } = setup({ rows: [] });
     expect(
-      await screen.findByText(/tether keeps each clone you list on its branch/),
+      await screen.findByText(
+        "tether keeps each clone you list on its branch. Find the clones on this Mac, or add one by hand.",
+      ),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Find clones" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Sync all" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add repository" }));
@@ -92,6 +95,7 @@ describe("Popover", () => {
       busy: [],
       note: null,
       details: {},
+      discovery: noDiscovery(),
     });
 
     it("shows the error panel, no footer, and Try again asks for the report", async () => {

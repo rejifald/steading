@@ -1,5 +1,6 @@
 //! `git reap add` / `remove` and the popover's *Add repository…* (rule 1): edit `repos.toml`,
-//! and nothing else.
+//! and nothing else. `remove` also writes the path to `skip` (repo ADR 0004 rule 3), so a clone
+//! just unlisted is not suggested again.
 
 use std::path::Path;
 
@@ -57,8 +58,8 @@ pub fn add(
     Ok(written)
 }
 
-/// Unlists a repo by name or path; returns it as it was written, or `None` when not listed.
-/// Its clone and worktrees are left as they are.
+/// Unlists a repo by name or path and adds it to `skip`, in one save; returns it as it was
+/// written, or `None` when not listed. Its clone, worktrees and state are left as they are.
 ///
 /// # Errors
 ///
@@ -70,6 +71,7 @@ pub fn remove(paths: &Paths, selector: &str) -> Result<Option<String>> {
         return Ok(None);
     };
     let removed = config.repo.remove(at);
+    config.add_skip(paths, &removed.path);
     config.save(paths)?;
     Ok(Some(removed.path))
 }

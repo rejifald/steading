@@ -19,11 +19,13 @@ and, in the app's `src/theme.css`, after Tailwind:
 | File | What |
 |---|---|
 | `src/theme.css` | the shared tokens (surfaces, text, border, focus, needs-you, radii, fonts, type scale, `shadow-raised`, `animate-progress`) and the window's base rules. Each app adds its accent, its state colours and `--color-progress`. |
-| `src/controls/TextButton.tsx`, `IconButton.tsx` | labelled and icon-only buttons |
+| `src/controls/TextButton.tsx`, `IconButton.tsx` | labelled and icon-only buttons; `TextButton` variants `primary`, `quiet`, `inset` and `link` (underlined text inside a sentence, compact size only) |
 | `src/controls/icons.tsx` | the icon set, named by shape; each tool maps its states to them |
 | `src/Callout.tsx` | the raised box with a top strip (tones `needs-you`, `plain`) |
 | `src/ProgressLine.tsx` | the 2px hairline while something runs |
 | `src/NoticeStrip.tsx` | the tinted strip under the header for a failure, verbatim |
+| `src/FoundSection.tsx` | the clones a scan found: `FoundSection` (modes `open`, `collapsed`, `settled`), its `FoundRow`s, and `FoundPreview`, the empty state's faded box of examples ([clone discovery](../../docs/design/discovery/anatomy.md)) |
+| `src/WhereToLook.tsx` | the "Where to look" view: `WhereToLook` (folders and skipped clones) and `WhereToLookFooter` (*Done*, *Look again*) |
 | `src/ReadError.tsx` | the full-panel body when the tool's config cannot be read |
 | `src/PopoverFrame.tsx`, `PopoverHeader.tsx`, `PopoverFooter.tsx` | the panel, its top band and its bottom band |
 

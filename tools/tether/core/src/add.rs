@@ -8,6 +8,7 @@ use anyhow::{Result, bail};
 
 use crate::config::{self, DEFAULT_REMOTE, Mode, Repo, RepoEntry, absolute, same_path};
 use crate::ctx::Ctx;
+use crate::discovery;
 use crate::inspect;
 use crate::{git, mirror, record, sync};
 
@@ -168,7 +169,8 @@ pub fn adoption_blockers(ctx: &Ctx, repo: &Repo) -> Result<Vec<String>> {
     Ok(found)
 }
 
-/// Unlists a repo. The clone itself is left exactly as it is.
+/// Unlists a repo and adds its path to `skip`, so discovery does not suggest it again. The clone
+/// itself is left exactly as it is.
 ///
 /// # Errors
 ///
@@ -180,6 +182,8 @@ pub fn remove(ctx: &Ctx, selector: &str) -> Result<Option<String>> {
         return Ok(None);
     };
     let removed = cfg.repo.remove(i);
+    // Repository ADR 0004 rule 3: not suggested again a minute later.
+    discovery::push_skip(&mut cfg, &ctx.paths, &ctx.paths.tilde(&repos[i].path));
     cfg.save(&ctx.paths)?;
     record::forget(&ctx.paths, &ctx.paths.tilde(&repos[i].path))?;
     Ok(Some(removed.path))

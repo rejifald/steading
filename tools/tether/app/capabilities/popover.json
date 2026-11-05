@@ -14,6 +14,12 @@
     "allow-add",
     "allow-set-interval",
     "allow-remove",
+    "allow-find-clones",
+    "allow-add-suggestion",
+    "allow-skip-clone",
+    "allow-unskip-clone",
+    "allow-add-scan-root",
+    "allow-remove-scan-root",
     "allow-open-in-finder",
     "allow-hide",
     "allow-quit"

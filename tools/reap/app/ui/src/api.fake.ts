@@ -1,7 +1,10 @@
-import type { Overall, ReapApi, Repo, Report, Salvaged, Snapshot, State, Worktree } from "./api";
+import type { Discovery, Overall, ReapApi, Repo, Report, RootInfo, Salvaged, Snapshot, SkippedClone, State, Suggestion, Worktree } from "./api";
 
 /** How long a fake refresh takes, so the refreshing state is visible in a browser. */
 const FAKE_REFRESH_TIME = 800;
+
+/** How long a fake scan spends in each root, so the streaming is visible in a browser. */
+const FAKE_ROOT_TIME = 600;
 
 const minutesAgo = (minutes: number, now: Date) =>
   new Date(now.getTime() - minutes * 60_000).toISOString();
@@ -145,6 +148,36 @@ export function sampleRepos(now = new Date()): Repo[] {
   ];
 }
 
+/** The roots a fresh popover looks in. */
+export const DEFAULT_ROOTS = ["~/Development", "~/Code"];
+
+/** Some clones with worktrees, most worktrees first, under the default roots. */
+export function sampleSuggestions(): Suggestion[] {
+  const suggestion = (name: string, root: string, worktrees: number): Suggestion => ({
+    path: `${root}/${name}`,
+    name,
+    root,
+    worktrees,
+  });
+  return [
+    suggestion("api", "~/Development", 7),
+    suggestion("web", "~/Development", 3),
+    suggestion("docs", "~/Code", 2),
+    suggestion("tools", "~/Code", 1),
+  ];
+}
+
+/** Discovery before any scan: the default roots, nothing found. */
+export function emptyDiscovery(): Discovery {
+  return {
+    scanned_at: null,
+    scanning: null,
+    roots: DEFAULT_ROOTS.map((path) => ({ path, clones: null, stopped_early: false, error: null })),
+    suggestions: [],
+    skipped: [],
+  };
+}
+
 function overallOf(repos: Repo[]): Overall {
   const states = repos.flatMap((repo) => repo.worktrees.map((worktree) => worktree.state));
   if (states.some((state) => NEEDS_YOU.includes(state))) return "needs-you";
@@ -168,6 +201,22 @@ export interface FakeOptions {
   note?: string;
   /** The first report never arrives: the skeleton. */
   isLoading?: boolean;
+  /** The scan roots with what the last scan found in each; defaults to `DEFAULT_ROOTS`, not yet scanned. */
+  roots?: RootInfo[];
+  /** What the last scan found, before the listed and skipped filter; also what the next scan finds. */
+  found?: Suggestion[];
+  /** Minutes since the last scan finished; absent means none has run. */
+  scannedMinutesAgo?: number;
+  /** Clones skipped so far. */
+  skipped?: SkippedClone[];
+  /** Starts mid-scan in this root and stays there: the scanning state, held still for a story. */
+  scanning?: string;
+  /** How long a scan spends in each root; defaults to a visible 600 ms. */
+  scanTime?: number;
+  /** *Add* on a suggestion rejects with this text, as `add` does. */
+  addError?: string;
+  /** *Add* on a suggestion never finishes: the busy row, held still for a test or a story. */
+  holdsAdds?: boolean;
 }
 
 /** An in-memory app for tests and for `npm run dev` in a plain browser. */
@@ -178,6 +227,24 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
   const pickedFolder =
     options.pickedFolder === undefined ? "~/Development/example-new" : options.pickedFolder;
   const handlers = new Set<(s: Snapshot) => void>();
+  let roots: RootInfo[] = options.roots ?? emptyDiscovery().roots;
+  let found: Suggestion[] = options.found ?? [];
+  let scannedAt: string | null =
+    options.scannedMinutesAgo === undefined ? null : minutesAgo(options.scannedMinutesAgo, new Date());
+  let skipped: SkippedClone[] = options.skipped ?? [];
+  let scanning: string | null = options.scanning ?? null;
+  const scanTime = options.scanTime ?? FAKE_ROOT_TIME;
+  const listed = (path: string) => repos.some((repo) => repo.path === path);
+
+  const discovery = (): Discovery => ({
+    scanned_at: scannedAt,
+    scanning,
+    roots,
+    suggestions: found.filter(
+      (suggestion) => !listed(suggestion.path) && !skipped.some((clone) => clone.path === suggestion.path),
+    ),
+    skipped,
+  });
 
   const snapshot = (): Snapshot => {
     const states = repos.flatMap((repo) => repo.worktrees.map((worktree) => worktree.state));
@@ -189,9 +256,9 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
       repos,
     };
     if (options.error !== undefined && options.repos === undefined) {
-      return { report: null, error: options.error, refreshing, note: null };
+      return { report: null, error: options.error, refreshing, note: null, discovery: discovery() };
     }
-    return { report, error: options.error ?? null, refreshing, note: options.note ?? null };
+    return { report, error: options.error ?? null, refreshing, note: options.note ?? null, discovery: discovery() };
   };
   const emit = () => handlers.forEach((handler) => handler(snapshot()));
   const setState = (path: string, state: Worktree["state"]) => {
@@ -200,6 +267,30 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
       worktrees: repo.worktrees.map((worktree) => (worktree.path === path ? { ...worktree, state } : worktree)),
     }));
     emit();
+  };
+
+  /** Walks the roots one at a time, filling Found as it goes, then stamps the time. */
+  const scan = (source: Suggestion[]) => {
+    found = [];
+    scannedAt = null;
+    const walk = (index: number) => {
+      const root = roots[index];
+      if (root === undefined) {
+        scanning = null;
+        scannedAt = new Date().toISOString();
+        emit();
+        return;
+      }
+      scanning = root.path;
+      emit();
+      setTimeout(() => {
+        const here = source.filter((suggestion) => suggestion.root === root.path);
+        found = [...found, ...here];
+        roots = roots.map((r) => (r.path === root.path && r.error === null ? { ...r, clones: here.length } : r));
+        walk(index + 1);
+      }, scanTime);
+    };
+    walk(0);
   };
 
   return {
@@ -279,6 +370,47 @@ export function createFakeApi(options: FakeOptions = {}): ReapApi {
           ? { ...repo, salvaged: (repo.salvaged ?? []).filter((salvaged) => salvaged.refname !== refname) }
           : repo,
       );
+      emit();
+    },
+    findClones: async () => {
+      if (scanning !== null) return;
+      scan(options.found ?? sampleSuggestions());
+    },
+    addSuggestion: async (path) => {
+      if (options.addError !== undefined) throw options.addError;
+      if (options.holdsAdds) return new Promise<void>(() => {});
+      const suggestion = found.find((candidate) => candidate.path === path);
+      if (listed(path)) throw `${path} is already listed`;
+      const name = suggestion?.name ?? path.split("/").pop() ?? path;
+      const worktrees = Array.from({ length: suggestion?.worktrees ?? 0 }, (_, index) => ({
+        name: `${name}-${index + 1}`,
+        path: `~/Development/worktrees/${name}-${index + 1}`,
+        branch: `feat/${name}-${index + 1}`,
+        state: "open" as const,
+        reason: "not merged into origin/main",
+      }));
+      repos = [...repos, { name, path, base: "origin/main", policy: "auto", worktrees }];
+      emit();
+    },
+    skipClone: async (path) => {
+      const suggestion = found.find((candidate) => candidate.path === path);
+      if (!suggestion || skipped.some((clone) => clone.path === path)) return;
+      skipped = [...skipped, { path, name: suggestion.name, root: suggestion.root }];
+      emit();
+    },
+    unskipClone: async (path) => {
+      skipped = skipped.filter((clone) => clone.path !== path);
+      emit();
+    },
+    addScanRoot: async (path) => {
+      if (roots.some((root) => root.path === path)) throw `${path} is already a place to look`;
+      roots = [...roots, { path, clones: null, stopped_early: false, error: null }];
+      emit();
+    },
+    removeScanRoot: async (path) => {
+      roots = roots.filter((root) => root.path !== path);
+      // Like the core: its suggestions go at once.
+      found = found.filter((suggestion) => suggestion.root !== path);
       emit();
     },
     hide: async () => {},

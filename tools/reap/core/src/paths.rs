@@ -73,6 +73,13 @@ impl Paths {
         self.config.join("repos.toml")
     }
 
+    /// What the last `discover` found (repo ADR 0004 rule 10); its own file, never a key in
+    /// `state.json`, whose loader would drop every record on a key it does not know.
+    #[must_use]
+    pub fn discovery_file(&self) -> PathBuf {
+        self.config.join("discovery.json")
+    }
+
     /// Present while background sweeping is paused (`git reap pause`, the popover's *Pause*).
     #[must_use]
     pub fn state_file(&self) -> PathBuf {

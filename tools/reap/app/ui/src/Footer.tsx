@@ -3,6 +3,8 @@ import { PopoverFooter } from "@steading/tray-popover/PopoverFooter";
 
 interface FooterProps {
   hasRepos: boolean;
+  /** Nothing is listed but Found fills the body: *Add repository* stays, quiet. */
+  hasFound?: boolean;
   /** Before the first report: the full footer, with Refresh disabled. */
   isLoading?: boolean;
   isRefreshing?: boolean;
@@ -16,6 +18,7 @@ interface FooterProps {
 /** The popover's fixed actions. */
 export function Footer({
   hasRepos,
+  hasFound = false,
   isLoading = false,
   isRefreshing = false,
   paused,
@@ -34,8 +37,8 @@ export function Footer({
       <TextButton variant={paused ? "primary" : "quiet"} onClick={onTogglePause}>
         {paused ? "Resume" : "Pause"}
       </TextButton>
-      {showsRepoActions && (
-        <TextButton variant={paused ? "quiet" : "primary"} className="ml-auto" onClick={onAdd}>
+      {(showsRepoActions || hasFound) && (
+        <TextButton variant={paused || !showsRepoActions ? "quiet" : "primary"} className="ml-auto" onClick={onAdd}>
           Add repository
         </TextButton>
       )}

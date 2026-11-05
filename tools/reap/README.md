@@ -114,6 +114,13 @@ low and its removable worktrees go largest first without waiting out their grace
 `~/.config/reap/state.json` holds the grace clocks, *Keep*s and refused removals, and the
 low-disk episodes already announced; a *Pause* file lives beside both.
 
+`git reap discover [--json]` looks in the folders of `scan` (default: whichever of `~/Development`,
+`~/Code`, `~/Projects`, `~/src`, `~/dev` and `~/work` exist; `scan = []` turns it off) and prints
+the unlisted clones that have linked worktrees, most first. It only suggests: listing one is
+`git reap add`. `git reap skip <path>` (and `remove`) adds a clone to `skip`; `git reap unskip`
+takes it out. The last scan is kept in `discovery.json` beside `state.json`
+([ADR 0004](../../docs/adr/0004-each-tool-suggests-the-clones-it-finds.md)).
+
 ## Salvaged changes
 
 A merged worktree with uncommitted changes is saved before it is removed: `git add -A` into a

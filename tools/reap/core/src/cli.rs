@@ -1,5 +1,5 @@
-//! The CLI (rule 14): `git reap status|sweep|salvage|salvaged|add|remove|keep|unkeep|pause|resume`.
-//! It reads git and the config directly; there is no IPC with the tray app.
+//! The CLI (rule 14): `git reap status|sweep|salvage|salvaged|add|remove|discover|skip|unskip|keep|unkeep|pause|resume`. It
+//! reads git and the config directly; there is no IPC with the tray app.
 
 use std::ffi::OsString;
 use std::fmt;
@@ -11,8 +11,10 @@ use chrono::Utc;
 use clap::{Parser, Subcommand};
 
 use crate::add;
+use crate::config::Config;
 use crate::ctx::Ctx;
-use crate::paths::Paths;
+use crate::discovery;
+use crate::paths::{Paths, absolute};
 use crate::pressure::Pressure;
 use crate::report;
 use crate::salvage;
@@ -86,6 +88,16 @@ enum Command {
     },
     /// Unlist a repo by name or path; its clone and worktrees are left as they are.
     Remove { repo: String },
+    /// Look in the scan folders for clones with worktrees that are not listed and print them
+    /// (repo ADR 0004). Lists nothing: that is `add`.
+    Discover {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop suggesting a clone (adds it to `skip` in repos.toml).
+    Skip { path: String },
+    /// Suggest a skipped clone again.
+    Unskip { path: String },
     /// Hold a worktree until it gets new commits (rule 10).
     Keep { worktree: String },
     /// End a Keep by hand.
@@ -178,6 +190,34 @@ fn dispatch(command: Command) -> Result<()> {
             Some(path) => println!("unlisted {path}; its clone and worktrees are untouched"),
             None => return Err(UsageError(format!("{repo} is not listed in repos.toml")).into()),
         },
+        Command::Discover { json } => {
+            discovery::scan(&paths, &discovery::Bounds::default(), &mut |_| {})?;
+            let view = discovery::view(&paths, None)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&view)?);
+            } else {
+                print!("{}", discovery::render(&view));
+            }
+        }
+        Command::Skip { path } => {
+            let path = absolute_path(&paths, &path)?;
+            discovery::skip(&paths, &path)?;
+            println!("skipping {}", paths.tilde(&paths.expand(&path)));
+        }
+        Command::Unskip { path } => {
+            let path = absolute_path(&paths, &path)?;
+            let config = Config::load(&paths)?;
+            let target = absolute(&paths.expand(&path));
+            if !config
+                .skipped(&paths)?
+                .iter()
+                .any(|skipped| absolute(skipped) == target)
+            {
+                return Err(UsageError(format!("{path} is not skipped")).into());
+            }
+            discovery::unskip(&paths, &path)?;
+            println!("{} is suggested again", paths.tilde(&paths.expand(&path)));
+        }
         Command::Keep { worktree } => {
             let kept = sweep::keep(&paths, &worktree)?;
             println!("kept {kept} until it gets new commits");
@@ -196,6 +236,15 @@ fn dispatch(command: Command) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// `path` if it is absolute or starts with `~/`; anything else is a usage error.
+fn absolute_path(paths: &Paths, path: &str) -> Result<String> {
+    if paths.expand(path).is_absolute() {
+        Ok(path.to_owned())
+    } else {
+        Err(UsageError(format!("{path} must be an absolute path or start with ~/")).into())
+    }
 }
 
 fn sweep_command(
@@ -397,6 +446,10 @@ mod tests {
             &["add", "~/Development/app"],
             &["add", "/a", "--remote", "up", "--base", "develop"],
             &["remove", "app"],
+            &["discover"],
+            &["discover", "--json"],
+            &["skip", "~/Development/scratch"],
+            &["unskip", "~/Development/scratch"],
             &["sweep"],
             &["sweep", "app", "--dry-run", "--json"],
             &["sweep", "--due"],
@@ -547,5 +600,8 @@ mod tests {
         assert_eq!(run(["git-reap", "keep"]), 2);
         assert_eq!(run(["git-reap", "salvage"]), 2);
         assert_eq!(run(["git-reap", "salvaged", "--repo", "app"]), 2);
+        assert_eq!(run(["git-reap", "skip"]), 2);
+        assert_eq!(run(["git-reap", "unskip"]), 2);
+        assert_eq!(run(["git-reap", "discover", "--yaml"]), 2);
     }
 }

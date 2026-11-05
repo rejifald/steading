@@ -1,9 +1,15 @@
 [workspace]
 resolver = "3"
-members = ["tools/tether/core", "tools/tether/app", "tools/reap/core", "tools/reap/app"]
+members = [
+    "crates/find-clones",
+    "tools/tether/core",
+    "tools/tether/app",
+    "tools/reap/core",
+    "tools/reap/app",
+]
 # `cargo test` / `cargo build` at the root stay fast and UI-free; the tray apps build with
 # `cargo build -p tether-app` / `-p reap-app`, or `cargo tauri build` from their `app/`.
-default-members = ["tools/tether/core", "tools/reap/core"]
+default-members = ["crates/find-clones", "tools/tether/core", "tools/reap/core"]
 
 # Each tool versions and releases on its own (`version` lives in each crate); these are the
 # settings every crate shares.

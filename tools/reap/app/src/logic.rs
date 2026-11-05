@@ -20,6 +20,13 @@ pub enum Event {
     Refresh,
 }
 
+/// The root the scan walks after it left `left`: the next one in `roots`, or `None` after the
+/// last (or when `left` is not a root, e.g. one removed mid-scan).
+pub fn next_scanning(roots: &[String], left: &str) -> Option<String> {
+    let at = roots.iter().position(|root| root == left)?;
+    roots.get(at + 1).cloned()
+}
+
 /// The notification of something that needs the owner now but did not before, as (title,
 /// message). `previous` is replaced by the current set, keyed by path and state, so a path that
 /// recovers and breaks again is reported again, and a held stale worktree that becomes saveable
@@ -554,6 +561,15 @@ mod tests {
                 "~/app: origin/main does not exist".to_string()
             )]
         );
+    }
+
+    #[test]
+    fn the_scan_moves_to_the_next_root_and_ends_after_the_last() {
+        let roots = ["~/Code".to_string(), "~/Work".to_string()];
+        assert_eq!(next_scanning(&roots, "~/Code").as_deref(), Some("~/Work"));
+        assert_eq!(next_scanning(&roots, "~/Work"), None);
+        assert_eq!(next_scanning(&roots, "~/Elsewhere"), None);
+        assert_eq!(next_scanning(&[], "~/Code"), None);
     }
 
     #[test]

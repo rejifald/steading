@@ -53,6 +53,10 @@ Rows carry no glyph of their own: their section already says it.
 An empty section is not shown. With nothing in *Needs you* or *Ready*, *Nothing to remove*
 takes their place.
 
+*Found* is not an outcome section: it holds the clones a scan found, not a worktree's fate, so
+it has no outcome glyph and does not go through `OutcomeSection` or `outcomeOf`. It is the last
+thing in the scroll, after *Repositories* ([clone discovery](../../../docs/design/discovery/anatomy.md)).
+
 The overall state in the header is a glyph and a word, first match wins: `needs you` (the
 config cannot be read), `paused`, `needs you (n)`, `refreshing…` (a spinning arc), then
 `tidy` (check circle) or `removal pending` (bin, `held`), the tray icon's states. `tidy` and
@@ -85,8 +89,10 @@ config cannot be read), `paused`, `needs you (n)`, `refreshing…` (a spinning a
   paused, *Resume* is the primary button and *Add repository* goes quiet.
 - **Add form:** replaces the list in place: the folder, picked with the macOS picker, and a
   ghost preview. reap finds the remote and base itself.
-- **Empty, loading, read error:** ghost lines with one sentence and *Add repository*; still
-  skeleton rows led by a glyph circle; the triangle, the error in monospace, and *Try again*.
+- **Empty, loading, read error:** the invitation (ghost clones with their worktree counts, one
+  sentence, *Add repository* and *Find clones*, and where it looks) or, after a scan that found
+  nothing, where it looked; still skeleton rows led by a glyph circle; the triangle, the error
+  in monospace, and *Try again*.
 
 ## Copy
 

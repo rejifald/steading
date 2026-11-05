@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Repo, Snapshot } from "./api";
-import { createFakeApi } from "./api.fake";
+import { createFakeApi, emptyDiscovery } from "./api.fake";
 import { Popover } from "./Popover";
 
 function setup(options: Parameters<typeof createFakeApi>[0] = {}) {
@@ -346,7 +346,13 @@ describe("Popover", () => {
 
   it("shows the read error panel and reloads from Try again", async () => {
     const api = createFakeApi();
-    const broken: Snapshot = { report: null, error: "expected a table at line 3", refreshing: false, note: null };
+    const broken: Snapshot = {
+      report: null,
+      error: "expected a table at line 3",
+      refreshing: false,
+      note: null,
+      discovery: emptyDiscovery(),
+    };
     const report = vi.fn().mockResolvedValueOnce(broken).mockImplementation(() => createFakeApi().report());
     render(<Popover api={{ ...api, report }} />);
     expect(await screen.findByText("Cannot read repos.toml")).toBeInTheDocument();

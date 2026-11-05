@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chosen: inline Found, started by hand</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;font-family:system-ui,-apple-system,"SF Pro Text","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit}
+a{color:inherit}a:hover{text-decoration:underline}
+</style>
+</helmet>
+<div style="width: 2440px; height: 1144px; box-sizing: border-box; padding: 40px; display: flex; flex-direction: column; gap: 40px; background: {{t.hover}}">
+
+<div style="display: flex; gap: 40px">
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">1 · Live: Find clones, then Add or ✕ each (try it)</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="position: relative; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><sc-if value="{{live.syncing}}" hint-placeholder-val="{{false}}"><span style="color: {{t.behind}}">syncing…</span></sc-if><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">{{live.aside}}</span><sc-if value="{{live.looking}}" hint-placeholder-val="{{false}}"><span style="position: absolute; left: 0; bottom: -1px; width: 40%; height: 2px; background: {{t.behind}}"></span></sc-if></header>
+
+<sc-if value="{{live.idle}}" hint-placeholder-val="{{true}}">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px">
+<div style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px dashed {{t.border}}; padding: 4px 0; opacity: 0.5" aria-hidden="true">
+<div style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">your-app</span><span style="flex: 1; color: {{t.faint}}">main · ~/Development</span><span style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; line-height: 22px; box-sizing: border-box">Add</span></div>
+<div style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">your-docs</span><span style="flex: 1; color: {{t.faint}}">main · ~/Code</span><span style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; line-height: 22px; box-sizing: border-box">Add</span></div>
+</div>
+<p style="margin: 0; text-align: center; color: {{t.muted}}">tether keeps each clone you list on its branch. Find the clones on this Mac, or add one by hand.</p>
+<div style="display: flex; gap: 8px"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button><button onClick="{{live.find}}" style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.accent}}; color: {{t.accentText}}; font-weight: 500">Find clones</button></div>
+<p style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; line-height: 14px; color: {{t.faint}}">Looks in ~/Development and ~/Code.<button style="height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: {{t.text}}; font-size: 11px; text-decoration: underline">Where to look…</button></p>
+</div>
+</sc-if>
+
+<sc-if value="{{live.shown}}" hint-placeholder-val="{{false}}">
+<div style="flex: 1; overflow: auto">
+<sc-if value="{{live.hasListed}}" hint-placeholder-val="{{false}}">
+<ul style="margin: 0; padding: 4px 8px; list-style: none">
+<sc-for list="{{live.listed}}" as="r" hint-placeholder-count="2">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.behind}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.25 8A5.25 5.25 0 1 1 8 2.75"></path></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}}</span><span style="width: 88px; font-size: 11px; color: {{t.behind}}">syncing…</span></li>
+</sc-for>
+</ul>
+</sc-if>
+<sc-if value="{{live.open}}" hint-placeholder-val="{{true}}">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px; border-top: 1px solid {{live.rule}}"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Found <span style="font-weight: 400; color: {{t.faint}}">{{live.count}}</span></h2><sc-if value="{{live.looking}}" hint-placeholder-val="{{false}}"><span style="margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 11px; color: {{t.behind}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.25 8A5.25 5.25 0 1 1 8 2.75"></path></svg>looking in ~/Code…</span></sc-if></div>
+<p style="margin: 0; padding: 0 16px 4px; font-size: 11px; line-height: 14px; color: {{t.muted}}">{{live.lead}}</p>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{live.found}}" as="r" hint-placeholder-count="6">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}} · {{r.root}}</span><button onClick="{{r.add}}" style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Add</button><button onClick="{{r.skip}}" aria-label="Skip {{r.name}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+<sc-if value="{{live.looking}}" hint-placeholder-val="{{false}}">
+<ul style="margin: 0; padding: 0 8px; list-style: none; opacity: 0.5" aria-hidden="true">
+<sc-for list="{{ghosts}}" as="g" hint-placeholder-count="3">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="width: {{g.w}}; height: 10px; border-radius: 9999px; background: {{t.border}}"></span></li>
+</sc-for>
+</ul>
+</sc-if>
+</sc-if>
+<sc-if value="{{live.settled}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; min-height: 32px; align-items: center; gap: 8px; padding: 6px 16px; border-top: 1px solid {{t.border}}"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="flex: 1; font-size: 11px; color: {{t.faint}}">No suggestions · looked just now</span><button onClick="{{live.find}}" style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Look again</button></div>
+</sc-if>
+</div>
+</sc-if>
+
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><sc-if value="{{live.hasListed}}" hint-placeholder-val="{{false}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Sync all</button></sc-if><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><sc-if value="{{live.shown}}" hint-placeholder-val="{{false}}"><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button></sc-if></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">2 · Looking: the Found section fills in as it goes</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="position: relative; display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">2 found</span><span style="position: absolute; left: 0; bottom: -1px; width: 40%; height: 2px; background: {{t.behind}}"></span></header>
+<div style="flex: 1; overflow: auto">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Found <span style="font-weight: 400; color: {{t.faint}}">2</span></h2><span style="margin-left: auto; display: flex; align-items: center; gap: 4px; font-size: 11px; color: {{t.behind}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.25 8A5.25 5.25 0 1 1 8 2.75"></path></svg>looking in ~/Code…</span></div>
+<p style="margin: 0; padding: 0 16px 4px; font-size: 11px; line-height: 14px; color: {{t.muted}}">You can add these now; more appear as the search goes.</p>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{firstTwo}}" as="r" hint-placeholder-count="2">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}} · {{r.root}}</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Add</button><button aria-label="Skip {{r.name}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+<ul style="margin: 0; padding: 0 8px; list-style: none; opacity: 0.5" aria-hidden="true">
+<sc-for list="{{ghosts}}" as="g" hint-placeholder-count="3">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="width: {{g.w}}; height: 10px; border-radius: 9999px; background: {{t.border}}"></span></li>
+</sc-for>
+</ul>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">3 · Found: triage each row</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">6 found</span></header>
+<div style="flex: 1; overflow: auto">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Found <span style="font-weight: 400; color: {{t.faint}}">6</span></h2><button style="margin-left: auto; height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Where to look…</button></div>
+<p style="margin: 0; padding: 0 16px 4px; font-size: 11px; line-height: 14px; color: {{t.muted}}">In ~/Development and ~/Code, just now. Add the ones to keep on their branch.</p>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{found}}" as="r" hint-placeholder-count="6">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}} · {{r.root}}</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Add</button><button aria-label="Skip {{r.name}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">4 · Triage: two added, four still found</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><span style="color: {{t.behind}}">syncing…</span><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">1 of 2</span></header>
+<div style="flex: 1; overflow: auto">
+<ul style="margin: 0; padding: 4px 8px; list-style: none">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.inSync}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.7"></path></svg></span><span style="font-weight: 500">api</span><span style="flex: 1; color: {{t.faint}}">main</span><span style="width: 88px; font-size: 11px; color: {{t.inSync}}">in sync</span></li>
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.behind}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13.25 8A5.25 5.25 0 1 1 8 2.75"></path></svg></span><span style="font-weight: 500">notes</span><span style="flex: 1; color: {{t.faint}}">main</span><span style="width: 88px; font-size: 11px; color: {{t.behind}}">syncing…</span></li>
+</ul>
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px; border-top: 1px solid {{t.border}}"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Found <span style="font-weight: 400; color: {{t.faint}}">4</span></h2><button style="margin-left: auto; height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Where to look…</button></div>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{rest}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}} · {{r.root}}</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Add</button><button aria-label="Skip {{r.name}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button disabled="{{true}}" style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500; opacity: 0.5">Sync all</button><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.accent}}; color: {{t.accentText}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">5 · Later: two left unanswered, Look again on the row</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><span style="display: inline-flex; align-items: center; gap: 8px; color: {{t.inSync}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.7"></path></svg>in sync</span><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">last sync 2 min ago</span></header>
+<div style="flex: 1; overflow: auto">
+<ul style="margin: 0; padding: 4px 8px; list-style: none">
+<sc-for list="{{listed}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.inSync}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.7"></path></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}}</span><span style="width: 88px; font-size: 11px; color: {{t.inSync}}">in sync</span></li>
+</sc-for>
+</ul>
+<div style="display: flex; min-height: 32px; align-items: center; gap: 8px; padding: 6px 16px; border-top: 1px solid {{t.border}}"><button aria-expanded="false" style="display: flex; flex: 1; align-items: center; gap: 8px; padding: 0; border: 0; background: transparent; color: {{t.text}}; text-align: left"><span style="display: flex; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5L10.5 8 6 12.5"></path></svg></span><span style="font-weight: 600">Found</span><span style="color: {{t.faint}}">2</span><span style="font-size: 11px; color: {{t.faint}}">· looked 3 days ago</span></button><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Look again</button></div>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Sync all</button><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.accent}}; color: {{t.accentText}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+</div>
+
+<div style="display: flex; gap: 40px">
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">6 · Looked again: nothing new</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><span style="display: inline-flex; align-items: center; gap: 8px; color: {{t.inSync}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.7"></path></svg>in sync</span><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">last sync 2 min ago</span></header>
+<div style="flex: 1; overflow: auto">
+<ul style="margin: 0; padding: 4px 8px; list-style: none">
+<sc-for list="{{listed}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.inSync}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25"></circle><path d="M5.4 8.2l1.8 1.8 3.4-3.7"></path></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}}</span><span style="width: 88px; font-size: 11px; color: {{t.inSync}}">in sync</span></li>
+</sc-for>
+</ul>
+<div style="display: flex; min-height: 32px; align-items: center; gap: 8px; padding: 6px 16px; border-top: 1px solid {{t.border}}"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="flex: 1; font-size: 11px; color: {{t.faint}}">Nothing new in ~/Development, ~/Code · looked just now</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Look again</button></div>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Sync all</button><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.accent}}; color: {{t.accentText}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">7 · Empty: first look found nothing</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1></header>
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px">
+<p style="margin: 0; text-align: center; color: {{t.muted}}">No clones in ~/Development or ~/Code. Look somewhere else, or add one by hand.</p>
+<div style="display: flex; gap: 8px"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Where to look…</button><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.accent}}; color: {{t.accentText}}; font-weight: 500">Add repository</button></div>
+<p style="margin: 0; font-size: 11px; line-height: 14px; color: {{t.faint}}">Looked just now · stopped early in ~/Code after 20 000 folders.</p>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">8 · Error: one folder unreadable, the rest shows</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">tether</h1><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">2 found</span></header>
+<div style="flex: 1; overflow: auto">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Found <span style="font-weight: 400; color: {{t.faint}}">2</span></h2><button style="margin-left: auto; height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Where to look…</button></div>
+<p style="margin: 0; padding: 0 16px 4px; display: flex; gap: 8px; font-size: 11px; line-height: 14px; color: {{t.text}}"><span style="display: flex; color: {{t.needs}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.25l6.25 11H1.75z"></path><path d="M8 6.5v3M8 11.4v.1"></path></svg></span>Cannot read ~/work: permission denied. ~/Development and ~/Code were searched.</p>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{firstTwo}}" as="r" hint-placeholder-count="2">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.branch}} · {{r.root}}</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Add</button><button aria-label="Skip {{r.name}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">9 · Where to look: folders and skipped clones</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">Where to look</h1></header>
+<div style="flex: 1; overflow: auto">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px"><h2 style="margin: 0; font-size: 13px; line-height: 18px; font-weight: 600">Folders</h2><button style="margin-left: auto; height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Add folder…</button></div>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{roots}}" as="f" hint-placeholder-count="2">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.5h5A1.5 1.5 0 0 1 14 6v5.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z"></path></svg></span><span style="flex: 1; font-weight: 500">{{f.path}}</span><span style="font-size: 11px; color: {{t.faint}}">{{f.found}}</span><button aria-label="Stop looking in {{f.path}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+<p style="margin: 0; padding: 0 16px 8px; font-size: 11px; line-height: 14px; color: {{t.muted}}">Desktop, Documents and Downloads are searched only if you add them here. macOS asks you first.</p>
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px; border-top: 1px solid {{t.border}}"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Skipped <span style="font-weight: 400; color: {{t.faint}}">2</span></h2></div>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{skippedRows}}" as="s" hint-placeholder-count="2">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="font-weight: 500">{{s.name}}</span><span style="flex: 1; color: {{t.faint}}">{{s.root}}</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Unskip</button></li>
+</sc-for>
+</ul>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Done</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.accent}}; color: {{t.accentText}}; font-weight: 500">Look again</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">10 · reap, not looked yet</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">reap</h1></header>
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px">
+<div style="width: 100%; box-sizing: border-box; border-radius: 6px; border: 1px dashed {{t.border}}; padding: 4px 0; opacity: 0.5" aria-hidden="true">
+<div style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">your-app</span><span style="flex: 1; color: {{t.faint}}">7 worktrees</span><span style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; line-height: 22px; box-sizing: border-box">Add</span></div>
+<div style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">your-site</span><span style="flex: 1; color: {{t.faint}}">2 worktrees</span><span style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; line-height: 22px; box-sizing: border-box">Add</span></div>
+</div>
+<p style="margin: 0; text-align: center; color: {{t.muted}}">reap removes the worktrees whose work has merged. Find the clones on this Mac that have worktrees, or add one by hand.</p>
+<div style="display: flex; gap: 8px"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.reap}}; color: {{t.accentText}}; font-weight: 500">Find clones</button></div>
+<p style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 11px; line-height: 14px; color: {{t.faint}}">Looks in ~/Development and ~/Code.<button style="height: 24px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: {{t.text}}; font-size: 11px; text-decoration: underline">Where to look…</button></p>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button></footer>
+</div>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 8px">
+<p style="margin: 0; font-size: 13px; line-height: 18px; color: {{t.muted}}">11 · reap, Found: worktree counts, most first</p>
+<div style="width: 360px; height: 480px; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}; font-size: 13px; line-height: 18px">
+<header style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid {{t.border}}"><h1 style="margin: 0; font-size: 14px; line-height: 20px; font-weight: 600">reap</h1><span style="margin-left: auto; font-size: 11px; color: {{t.faint}}">4 found</span></header>
+<div style="flex: 1; overflow: auto">
+<div style="display: flex; align-items: center; gap: 8px; padding: 12px 16px 4px"><h2 style="margin: 0; display: flex; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 600">Found <span style="font-weight: 400; color: {{t.faint}}">4</span></h2><button style="margin-left: auto; height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}">Where to look…</button></div>
+<p style="margin: 0; padding: 0 16px 4px; font-size: 11px; line-height: 14px; color: {{t.muted}}">Clones with worktrees in ~/Development and ~/Code, just now. Merged worktrees go 24 h after reap first sees them.</p>
+<ul style="margin: 0; padding: 0 8px 4px; list-style: none">
+<sc-for list="{{rFound}}" as="r" hint-placeholder-count="4">
+<li style="display: flex; height: 32px; align-items: center; gap: 8px; padding: 0 8px"><span style="display: flex; color: {{t.faint}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.25" stroke-dasharray="2 2.4"></circle></svg></span><span style="font-weight: 500">{{r.name}}</span><span style="flex: 1; color: {{t.faint}}">{{r.count}} · {{r.root}}</span><button style="height: 24px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.surface}}; color: {{t.text}}">Add</button><button aria-label="Skip {{r.name}}" style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: {{t.muted}}"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"></path></svg></button></li>
+</sc-for>
+</ul>
+</div>
+<footer style="display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid {{t.border}}"><button style="height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Pause</button><button style="margin-left: auto; height: 28px; padding: 0 12px; border-radius: 6px; border: 1px solid {{t.border}}; background: {{t.raised}}; color: {{t.text}}; font-weight: 500">Add repository</button></footer>
+</div>
+</div>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":2440,"height":1144}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { phase: 'idle', added: [], skipped: [] };
+  }
+  componentWillUnmount() {
+    clearTimeout(this.timer);
+  }
+  renderVals() {
+    const L = {surface:'#f5f5f7',raised:'#ffffff',hover:'#ebebf0',border:'#d6d6db',text:'#1d1d1f',muted:'#55555a',faint:'#636368',accentText:'#ffffff',focus:'#2f7cf6',needs:'#b13a08',accent:'#0058c4',inSync:'#1a6e2f',behind:'#2457b8',skipped:'#7d5800',reap:'#2e7d4f'};
+    const D = {surface:'#262628',raised:'#2f2f32',hover:'#38383b',border:'#444448',text:'#f5f5f7',muted:'#b4b4b9',faint:'#a3a3a8',accentText:'#ffffff',focus:'#5c9dff',needs:'#ff8f55',accent:'#0060df',inSync:'#55c872',behind:'#7aaaff',skipped:'#e0b23c',reap:'#2e7d4f'};
+    const t = this.props.dark ? D : L;
+    const found = [
+      {name:'api', branch:'main', root:'~/Development'},
+      {name:'web', branch:'main', root:'~/Development'},
+      {name:'infra', branch:'main', root:'~/Development'},
+      {name:'notes', branch:'main', root:'~/Code'},
+      {name:'dotfiles', branch:'master', root:'~/Code'},
+      {name:'blog', branch:'trunk', root:'~/Code'}
+    ];
+    const { phase, added, skipped } = this.state;
+    const find = () => {
+      clearTimeout(this.timer);
+      this.setState({ phase: 'looking' });
+      this.timer = setTimeout(() => this.setState({ phase: 'found' }), 1600);
+    };
+    const looking = phase === 'looking';
+    const pool = looking ? found.slice(0, 2) : found;
+    const open = phase === 'idle' ? [] : pool.filter((f) => !added.includes(f.name) && !skipped.includes(f.name));
+    const listed = found.filter((f) => added.includes(f.name));
+    const live = {
+      idle: phase === 'idle',
+      shown: phase !== 'idle',
+      looking,
+      syncing: listed.length > 0,
+      listed,
+      hasListed: listed.length > 0,
+      found: open.map((f) => ({
+        ...f,
+        add: () => this.setState({ added: [...added, f.name] }),
+        skip: () => this.setState({ skipped: [...skipped, f.name] })
+      })),
+      open: looking || open.length > 0,
+      settled: phase === 'found' && open.length === 0,
+      count: open.length,
+      rule: listed.length > 0 ? t.border : 'transparent',
+      lead: looking ? 'You can add these now; more appear as the search goes.' : 'In ~/Development and ~/Code, just now. Add the ones to keep on their branch.',
+      aside: phase === 'idle' ? '' : `${open.length} found`,
+      find
+    };
+    return {
+      t,
+      live,
+      found,
+      firstTwo: found.slice(0, 2),
+      rest: found.filter((f) => f.name !== 'api' && f.name !== 'notes'),
+      ghosts: [{w:'96px'}, {w:'64px'}, {w:'120px'}],
+      listed: [{name:'api', branch:'main'}, {name:'notes', branch:'main'}, {name:'web', branch:'main'}, {name:'infra', branch:'main'}],
+      roots: [{path:'~/Development', found:'5 clones'}, {path:'~/Code', found:'3 clones'}],
+      skippedRows: [{name:'scratch', root:'~/Development'}, {name:'old-site', root:'~/Code'}],
+      rFound: [
+        {name:'api', count:'7 worktrees', root:'~/Development'},
+        {name:'web', count:'4 worktrees', root:'~/Development'},
+        {name:'infra', count:'2 worktrees', root:'~/Development'},
+        {name:'notes', count:'1 worktree', root:'~/Code'}
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

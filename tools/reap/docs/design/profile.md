@@ -51,6 +51,9 @@ design-handover). One surface: the menu-bar popover in `app/ui/`.
 ## Design docs
 
 - `docs/design/<surface>/anatomy.md` with frozen images in `docs/design/<surface>/reference/`.
+- A surface both tools draw lives at the repository root instead:
+  [`docs/design/discovery/`](../../../../docs/design/discovery/anatomy.md) (clone discovery). Its
+  reference is the design canvas's `.dc.html` source.
 - Reference images and committed screenshots use made-up repository names (the repository
   rules forbid private repository names).
 

@@ -40,12 +40,12 @@ jobs:
       - name: Format
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         run: cargo fmt --all --check
-      - name: Lint (cores and CLIs)
+      - name: Lint (crates, cores and CLIs)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
-        run: cargo clippy -p tether-core -p reap-core --all-targets --locked -- -D warnings
-      - name: Test (cores and CLIs)
+        run: cargo clippy -p find-clones -p tether-core -p reap-core --all-targets --locked -- -D warnings
+      - name: Test (crates, cores and CLIs)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
-        run: cargo test -p tether-core -p reap-core --locked
+        run: cargo test -p find-clones -p tether-core -p reap-core --locked
       - name: UI install
         id: ui-install
         if: ${{ !cancelled() }}

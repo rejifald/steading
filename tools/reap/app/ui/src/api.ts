@@ -102,6 +102,48 @@ export interface Report {
   repos: Repo[];
 }
 
+/** One folder a scan walks, with what the last scan found there. */
+export interface RootInfo {
+  /** With `~`. */
+  path: string;
+  /** Main clones the last scan found under it, before the worktree filter; `null` when it was not in that scan. */
+  clones: number | null;
+  /** The walk hit its folder or time cap here. */
+  stopped_early: boolean;
+  /** Why it could not be read, verbatim. */
+  error: string | null;
+}
+
+/** A clone a scan found that has linked worktrees and is not listed or skipped. */
+export interface Suggestion {
+  /** With `~`; the key commands take. */
+  path: string;
+  name: string;
+  /** The scan root it was found under, with `~`. */
+  root: string;
+  worktrees: number;
+}
+
+/** A clone the operator skipped; unskipping brings it back to Found if the last scan saw it. */
+export interface SkippedClone {
+  path: string;
+  name: string;
+  /** The longest scan root above it; `null` when none is. */
+  root: string | null;
+}
+
+/** What clone discovery knows: the last scan, the scan in progress, and what is left to answer. */
+export interface Discovery {
+  /** RFC 3339; `null` until a scan has finished. */
+  scanned_at: string | null;
+  /** The root being walked now, with `~`; `null` when no scan runs. */
+  scanning: string | null;
+  roots: RootInfo[];
+  /** Listed and skipped clones already left out; most worktrees first within a root. */
+  suggestions: Suggestion[];
+  skipped: SkippedClone[];
+}
+
 /** What the app sends with every refresh: the report and what only the tray knows. */
 export interface Snapshot {
   /** `null` before the first report, or when repos.toml cannot be read (see `error`). */
@@ -110,6 +152,7 @@ export interface Snapshot {
   refreshing: boolean;
   /** The last failed action, until the next refresh. */
   note: string | null;
+  discovery: Discovery;
 }
 
 /** Everything the popover can ask of the app. Failing calls reject with the error text. */
@@ -132,6 +175,14 @@ export interface ReapApi {
   saveAndRemove(path: string): Promise<void>;
   /** Deletes one save, in the repo it is listed under. */
   deleteSalvaged(repo: string, refname: string): Promise<void>;
+  /** Starts a scan of the roots in the background and returns at once; progress arrives as snapshots. */
+  findClones(): Promise<void>;
+  /** Lists a suggested clone, as *Add repository* would; rejects with `add`'s own text. */
+  addSuggestion(path: string): Promise<void>;
+  skipClone(path: string): Promise<void>;
+  unskipClone(path: string): Promise<void>;
+  addScanRoot(path: string): Promise<void>;
+  removeScanRoot(path: string): Promise<void>;
   hide(): Promise<void>;
   quit(): Promise<void>;
 }
@@ -152,6 +203,12 @@ export const tauriApi: ReapApi = {
   removeNow: (path) => invoke("remove_now", { path }),
   saveAndRemove: (path) => invoke("save_and_remove", { path }),
   deleteSalvaged: (repo, refname) => invoke("delete_salvaged", { repo, refname }),
+  findClones: () => invoke("find_clones"),
+  addSuggestion: (path) => invoke("add_suggestion", { path }),
+  skipClone: (path) => invoke("skip_clone", { path }),
+  unskipClone: (path) => invoke("unskip_clone", { path }),
+  addScanRoot: (path) => invoke("add_scan_root", { path }),
+  removeScanRoot: (path) => invoke("remove_scan_root", { path }),
   hide: () => invoke("hide"),
   quit: () => invoke("quit"),
 };

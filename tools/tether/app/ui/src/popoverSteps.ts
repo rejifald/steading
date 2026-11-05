@@ -20,6 +20,22 @@ export async function openAddForm(canvasElement: HTMLElement, { choose = true } 
   if (choose) await userEvent.click(await canvas.findByRole("button", { name: "Choose…" }));
 }
 
+/** Presses *Find clones* in the invitation: the scan starts and Found fills in per root. */
+export async function findClones(canvasElement: HTMLElement) {
+  await userEvent.click(await within(canvasElement).findByRole("button", { name: "Find clones" }));
+}
+
+/** Opens the "Where to look" view from the invitation, the Found heading or the nothing-found state. */
+export async function openWhereToLook(canvasElement: HTMLElement) {
+  await userEvent.click(await within(canvasElement).findByRole("button", { name: "Where to look…" }));
+  await within(canvasElement).findByRole("heading", { name: "Where to look", level: 1 });
+}
+
+/** Opens the collapsed Found row under the listed repos. */
+export async function expandFound(canvasElement: HTMLElement) {
+  await userEvent.click(await within(canvasElement).findByRole("button", { name: /^Found\s*\d/ }));
+}
+
 /** Opens a repo's settings from its row, or from its callout when it needs you. */
 export async function openSettings(canvasElement: HTMLElement, name: string) {
   const canvas = within(canvasElement);

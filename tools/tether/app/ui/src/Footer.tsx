@@ -7,6 +7,8 @@ interface FooterProps {
   isLoading?: boolean;
   /** A sync is running: Sync all is disabled. */
   isSyncing?: boolean;
+  /** Nothing is listed but the Found section fills the body: *Add repository* sits at the right, quiet. */
+  isFoundBody?: boolean;
   /** Resume becomes the primary action and Add repository goes quiet. */
   paused: boolean;
   onSyncAll: () => void;
@@ -19,6 +21,7 @@ export function Footer({
   hasRepos,
   isLoading = false,
   isSyncing = false,
+  isFoundBody = false,
   paused,
   onSyncAll,
   onTogglePause,
@@ -36,6 +39,11 @@ export function Footer({
       </TextButton>
       {(hasRepos || isLoading) && (
         <TextButton variant={paused ? "quiet" : "primary"} className="ml-auto" onClick={onAdd}>
+          Add repository
+        </TextButton>
+      )}
+      {isFoundBody && !hasRepos && (
+        <TextButton variant="quiet" className="ml-auto" onClick={onAdd}>
           Add repository
         </TextButton>
       )}

@@ -7,6 +7,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Added
 
+- `git reap discover [--json]`, `skip` and `unskip` ([repo ADR 0004](../../docs/adr/0004-each-tool-suggests-the-clones-it-finds.md)):
+  suggest the unlisted clones that have linked worktrees, found by a bounded, read-only walk of
+  `scan` in `repos.toml`; `skip` hides one, and `remove` now skips what it unlists. The last scan
+  is kept in `discovery.json`.
 - `install.sh` (ADR 0001 rule 16): builds reap, shows `status` and the first `sweep --dry-run`,
   asks, then installs the app to `~/Applications`, links `git-reap` and registers the login item;
   `--dry-run`, `--yes` and `--uninstall`.
