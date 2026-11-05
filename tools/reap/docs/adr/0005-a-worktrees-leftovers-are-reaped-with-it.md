@@ -55,10 +55,14 @@ matched to a worktree by its name, which is a guess.
    as rule 9 does for `gh`.
 3. **Dev servers can hold a worktree only alone.** A process inside a worktree (rule 5) is a
    *server* when it, or a process in its process group, listens on a TCP port
-   (`lsof -iTCP -sTCP:LISTEN`) and it has no controlling terminal. A worktree is *held by
-   servers* when every process inside it is a server. One shell, editor or agent process inside
-   it keeps it plain *in use*, and nothing in it is ever stopped. reap and tether's own processes
-   are never servers.
+   (`lsof -iTCP -sTCP:LISTEN`). A controlling terminal does not matter: a forgotten
+   `npm run dev` runs in a terminal tab and is a server. Its *launching shell* is the nearest
+   ancestor that is a shell, and it belongs to the server group only while the servers are its
+   only children (it is idle, waiting for them). A worktree is *held by servers* when every
+   process inside it is a server or the launching shell of one. Any other shell, an editor or an
+   agent process inside it keeps it plain *in use*, and nothing in it is ever stopped. A shell
+   that has another child, such as a second command or an agent, is not idle and is never a
+   launching shell. reap and tether's own processes are never servers.
 4. **Stopping is opt-in, before removal.** `stop_compose` and `stop_servers` (both default
    `false`, globally and per repo) let reap stop these holders. With one set, a merged, clean,
    not-kept worktree whose only holders are of that kind is *removable* (rule 6). The grace clock
@@ -68,9 +72,11 @@ matched to a worktree by its name, which is a guess.
    - **Compose:** `docker compose --project-name <project> down` for each project the worktree
      holds, running or stopped. Never `--volumes`, so named volumes and the data in them survive,
      and a `compose up` from another worktree brings the stack back.
-   - **Servers:** `SIGTERM` to each server's process group, then up to 10 s for it to exit. reap
-     never sends `SIGKILL`. A server still running then is recorded as a refusal on the row, as
-     a git refusal is (rule 11), and the worktree stays.
+   - **Servers:** `SIGTERM` to each server's process group, then up to 10 s for it to exit. Once
+     the servers are gone, an idle launching shell with nothing left to wait for gets `SIGHUP`,
+     as closing its terminal tab would, since a shell left in the worktree would still hold it.
+     reap never sends `SIGKILL`. A server still running then is recorded as a refusal on the row,
+     as a git refusal is (rule 11), and the worktree stays.
    - reap runs `lsof` and `docker ps` again, and removes the worktree only if nothing holds it
      now. Anything that started inside it in the meantime keeps it.
 5. **The operator can always stop them by hand.** The popover offers *Stop and remove* on a row
@@ -84,7 +90,7 @@ matched to a worktree by its name, which is a guess.
      holds it (`Merged in #212 · held by a dev server`), and under it one line per holder,
      indented on a hairline:
      - a server: its command, port, pid and uptime (`vite :5173 · pid 4121 · up 2 d`), with
-       *Stop*;
+       *Stop*; its idle launching shell is part of the line, not a holder of its own;
      - a Compose project: its name, running count and uptime, then its services and
        `volumes kept` (`webapp-dev 4 running · up 12 h`), with *Stop*;
      - anything else: the process names and `reap won’t stop a shell or a session`, with no
@@ -121,6 +127,10 @@ process or build folder that it cannot tie to a listed clone's worktree.
 - **Stop Compose stacks by default.** `down` without `--volumes` loses no data, but a project
   name shared by every worktree of a repo means stopping one worktree's stack can take down the
   stack another worktree is using. That needs the operator's say-so per repo.
+- **Count only servers with no controlling terminal.** It separates a server from a session
+  cleanly, but a forgotten `npm run dev` runs in a terminal tab and has one, so the case that
+  motivates this ADR would never qualify. Listening on a port, plus the rule that every process
+  inside the worktree is a server or its idle launching shell, keeps sessions protected.
 - **Stop every process inside a merged worktree.** It frees every held worktree, but the holder
   is usually a shell or an agent session that someone will come back to, which is what rule 5
   protects.
@@ -148,6 +158,8 @@ process or build folder that it cannot tie to a listed clone's worktree.
   [styleguide](../styleguide.md) and the popover anatomy gain these rows when this is built.
 - reap now depends on `docker` and on Xcode's defaults in addition to git and `gh`, both
   optional: without them it behaves as before.
+- Stopping a terminal-launched server also hangs up its idle launching shell, which closes that
+  tab's session. A shell that is running anything else is never touched.
 - A process that holds files in the worktree without having its current directory there (a
   server started from elsewhere with an absolute path) is still not seen, as before.
 - Out of scope: simulators and the apps installed on them, containers started without Compose
