@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::ffi::OsStr;
+use std::io;
 use std::path::Path;
 use std::process::Output;
 
@@ -14,11 +15,14 @@ use anyhow::{Context, Result, bail};
 
 use crate::git;
 use crate::paths::Paths;
+use crate::volume::{self, ReadVolume, Volume};
 
 pub struct Ctx {
     pub paths: Paths,
     pub dry_run: bool,
     log: RefCell<Vec<String>>,
+    /// Reads a folder's volume and its free space; tests replace it (rule 17).
+    volumes: Box<ReadVolume>,
 }
 
 impl Ctx {
@@ -28,7 +32,33 @@ impl Ctx {
             paths,
             dry_run,
             log: RefCell::new(Vec::new()),
+            volumes: Box::new(volume::read),
         }
+    }
+
+    /// Replaces the free-space reader, so a test can fake a low volume.
+    #[must_use]
+    pub fn with_volumes(
+        mut self,
+        reader: impl Fn(&Path) -> io::Result<Volume> + Send + Sync + 'static,
+    ) -> Self {
+        self.volumes = Box::new(reader);
+        self
+    }
+
+    /// The volume `path` is on, as it is now.
+    ///
+    /// # Errors
+    ///
+    /// Fails when `path` cannot be read.
+    pub fn volume_of(&self, path: &Path) -> io::Result<Volume> {
+        (self.volumes)(path)
+    }
+
+    /// The free-space reader, for code that has no `Ctx`.
+    #[must_use]
+    pub fn reader(&self) -> &ReadVolume {
+        &*self.volumes
     }
 
     pub fn note(&self, line: impl Into<String>) {

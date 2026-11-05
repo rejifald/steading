@@ -230,6 +230,8 @@ fn an_abandoned_worktree_is_never_removed_by_a_sweep_under_any_policy() {
         std::fs::write(idle.join("notes.md"), "half a thought").unwrap();
         sandbox.list_clone();
         set_global(&sandbox, &format!("policy = \"{policy}\""));
+        // The count below is the abandoned row alone, whatever the host disk holds free.
+        set_global(&sandbox, "low_disk = \"off\"");
 
         let stale = sweep_at(&sandbox, later(21 * DAY));
         let much_later = sweep_at(&sandbox, later(90 * DAY));

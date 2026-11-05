@@ -683,6 +683,7 @@ mod tests {
             dirty_grace: std::time::Duration::ZERO,
             salvage_max_untracked: 0,
             salvage_max_age: std::time::Duration::ZERO,
+            low_disk: crate::config::LowDisk::Off,
         };
 
         let line = restore(&paths, &repo, "refs/reap/salvage/x$(id)/1", Some("/w"));

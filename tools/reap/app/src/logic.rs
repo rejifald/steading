@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use reap_core::classify::State;
-use reap_core::report::{Overall, Report};
+use reap_core::pressure::{Holder, Pressure};
+use reap_core::report::{Overall, Report, shown_size};
 use reap_core::sweep::Outcome;
 
 /// More notifications than this in one pass become one summary, so a first pass over a clone
@@ -67,11 +68,121 @@ const NEEDS_YOU: &str = "reap needs you";
 /// The title of an abandoned worktree's one notification.
 const TO_SAVE: &str = "reap: worktree to save";
 
-/// What a pass tells the owner (rules 10 and 11): a grace clock started, a removal, a refusal.
-pub fn notifications(outcomes: &[Outcome]) -> Vec<(String, String)> {
+/// The most holders a "still low" notice names; the rest are counted.
+const MAX_HOLDERS: usize = 3;
+
+/// A worktree's folder name, from its path as shown.
+fn folder_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+fn plural(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
+}
+
+/// What the pressure pass tells the owner about each volume (ADR low-disk-skips-the-grace):
+/// what it removed, once per episode that nothing is left to remove and what holds the space,
+/// and the `policy = "ask"` worktrees that could go.
+pub fn pressure_notifications(volumes: &[Pressure]) -> Vec<(String, String)> {
+    const TITLE: &str = "reap: low disk";
     let mut messages = Vec::new();
+    for pressure in volumes {
+        let name = &pressure.volume.name;
+        if !pressure.removed.is_empty() {
+            let names: Vec<&str> = pressure
+                .removed
+                .iter()
+                .map(|reclaimed| folder_name(&reclaimed.removed.path))
+                .collect();
+            messages.push((
+                TITLE.to_string(),
+                format!(
+                    "Low disk on {name}: removed {}, freed {}: {}",
+                    plural(names.len(), "worktree"),
+                    shown_size(pressure.freed_bytes),
+                    names.join(", ")
+                ),
+            ));
+        }
+        if pressure.announce_stuck {
+            messages.push((TITLE.to_string(), still_low(pressure)));
+        }
+        if pressure.announce_asked {
+            let names: Vec<&str> = pressure
+                .asked
+                .iter()
+                .map(|holder| folder_name(&holder.path))
+                .collect();
+            messages.push((
+                TITLE.to_string(),
+                format!(
+                    "Low disk on {name}: {} can be removed; confirm with Remove now",
+                    names.join(", ")
+                ),
+            ));
+        }
+        for refused in &pressure.refused {
+            messages.push((
+                "reap needs you".to_string(),
+                format!(
+                    "git refused to remove {}: {}",
+                    refused.path, refused.message
+                ),
+            ));
+        }
+    }
+    messages
+}
+
+/// "Low disk on X: 4.1 GB free, and nothing reap can remove. Holding space: …".
+fn still_low(pressure: &Pressure) -> String {
+    let volume = &pressure.volume;
+    let holder = |holder: &Holder| {
+        let size = holder
+            .bytes
+            .map(|bytes| format!(" {}", shown_size(bytes)))
+            .unwrap_or_default();
+        format!("{}{size} ({})", folder_name(&holder.path), holder.why)
+    };
+    let named: Vec<String> = volume
+        .holders
+        .iter()
+        .take(MAX_HOLDERS)
+        .map(holder)
+        .collect();
+    let more = volume.holders.len().saturating_sub(MAX_HOLDERS);
+    let holding = match (named.is_empty(), more) {
+        (true, _) => String::new(),
+        (false, 0) => format!(" Holding space: {}.", named.join(", ")),
+        (false, more) => format!(" Holding space: {}, and {more} more.", named.join(", ")),
+    };
+    format!(
+        "Low disk on {}: {} free, and nothing reap can remove.{holding}",
+        volume.name,
+        shown_size(volume.available_bytes)
+    )
+}
+
+/// What a pass tells the owner (rules 10 and 11): a grace clock started, a removal, a refusal,
+/// and the pressure pass's notices. A clock the pressure pass already ran out is not announced.
+pub fn notifications(outcomes: &[Outcome], volumes: &[Pressure]) -> Vec<(String, String)> {
+    let mut messages = Vec::new();
+    let is_reclaimed = |path: &str| {
+        volumes
+            .iter()
+            .flat_map(|pressure| &pressure.removed)
+            .any(|reclaimed| reclaimed.removed.path == path)
+    };
     for outcome in outcomes {
-        for started in &outcome.started {
+        for started in outcome
+            .started
+            .iter()
+            .filter(|started| !is_reclaimed(&started.path))
+        {
             let when = started.removes_at.map_or_else(
                 || "confirm with Remove now".to_string(),
                 |time| {
@@ -112,6 +223,7 @@ pub fn notifications(outcomes: &[Outcome]) -> Vec<(String, String)> {
             ));
         }
     }
+    messages.extend(pressure_notifications(volumes));
     messages
 }
 
@@ -125,6 +237,7 @@ pub fn batched(messages: Vec<(String, String)>) -> Vec<(String, String)> {
         ("reap: worktree to remove", "to remove"),
         ("reap removed a worktree", "removed"),
         (TO_SAVE, "to save"),
+        ("reap: low disk", "low disk"),
         (NEEDS_YOU, "need you"),
     ]
     .iter()
@@ -198,7 +311,9 @@ pub fn reopens(hidden_at: Option<Instant>, now: Instant, guard: Duration) -> boo
 
 #[cfg(test)]
 mod tests {
+    use reap_core::pressure::{Reclaimed, VolumeStatus};
     use reap_core::report::{RepoReport, Row};
+    use reap_core::sweep::{Refused, Removed, Started};
 
     use super::*;
 
@@ -226,6 +341,7 @@ mod tests {
             overall: Overall::NeedsYou,
             removable: 0,
             needs_you: 1,
+            volumes: Vec::new(),
             repos: vec![RepoReport {
                 name: "app".into(),
                 path: "~/app".into(),
@@ -237,6 +353,153 @@ mod tests {
                 salvaged: Vec::new(),
             }],
         }
+    }
+
+    fn holder(path: &str, why: &str, bytes: u64) -> Holder {
+        Holder {
+            path: path.into(),
+            why: why.into(),
+            bytes: Some(bytes),
+        }
+    }
+
+    fn volume(is_low: bool, holders: Vec<Holder>) -> Pressure {
+        Pressure {
+            volume: VolumeStatus {
+                name: "Backup".into(),
+                mount: "/Volumes/Backup".into(),
+                total_bytes: 1_000_000_000_000,
+                available_bytes: 40_000_000_000,
+                threshold_bytes: Some(100_000_000_000),
+                is_low,
+                removable: 0,
+                holders,
+            },
+            removed: Vec::new(),
+            freed_bytes: 0,
+            refused: Vec::new(),
+            skipped: Vec::new(),
+            asked: Vec::new(),
+            announce_asked: false,
+            announce_stuck: false,
+            log: Vec::new(),
+        }
+    }
+
+    fn reclaimed(path: &str, bytes: u64) -> Reclaimed {
+        Reclaimed {
+            repo: "~/app".into(),
+            removed: Removed {
+                path: path.into(),
+                branch: None,
+                branch_kept: None,
+                salvaged_to: None,
+            },
+            bytes,
+        }
+    }
+
+    #[test]
+    fn a_pressure_pass_says_what_it_removed_and_freed() {
+        let mut pressure = volume(false, Vec::new());
+        pressure.removed = vec![
+            reclaimed("~/w/big", 6_000_000_000),
+            reclaimed("~/w/small", 2_000_000_000),
+        ];
+        pressure.freed_bytes = 8_000_000_000;
+
+        assert_eq!(
+            pressure_notifications(&[pressure.clone()]),
+            [(
+                "reap: low disk".to_string(),
+                "Low disk on Backup: removed 2 worktrees, freed 8.0 GB: big, small".to_string()
+            )]
+        );
+        pressure.removed.truncate(1);
+        assert!(
+            pressure_notifications(&[pressure])[0]
+                .1
+                .contains("removed 1 worktree,")
+        );
+    }
+
+    #[test]
+    fn a_volume_that_stays_low_says_what_holds_the_space_once() {
+        let mut pressure = volume(
+            true,
+            vec![
+                holder("~/w/dirty", "dirty", 9_000_000_000),
+                holder("~/w/kept", "kept", 3_000_000_000),
+                holder("~/w/busy", "in use", 2_000_000_000),
+                holder("~/w/more", "locked", 1_000_000_000),
+            ],
+        );
+        assert_eq!(
+            pressure_notifications(&[pressure.clone()]),
+            Vec::<(String, String)>::new()
+        );
+        pressure.announce_stuck = true;
+
+        assert_eq!(
+            pressure_notifications(&[pressure]),
+            [(
+                "reap: low disk".to_string(),
+                "Low disk on Backup: 40 GB free, and nothing reap can remove. Holding space: \
+                 dirty 9.0 GB (dirty), kept 3.0 GB (kept), busy 2.0 GB (in use), and 1 more."
+                    .to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn an_ask_repo_gets_an_immediate_low_disk_notice_and_nothing_is_removed() {
+        let mut pressure = volume(true, Vec::new());
+        pressure.asked = vec![holder("~/w/asked", "removable", 5_000_000_000)];
+        pressure.announce_asked = true;
+
+        assert_eq!(
+            pressure_notifications(&[pressure]),
+            [(
+                "reap: low disk".to_string(),
+                "Low disk on Backup: asked can be removed; confirm with Remove now".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_clock_the_pressure_pass_ran_out_is_not_announced() {
+        let started = |path: &str| Started {
+            path: path.into(),
+            reason: "merged".into(),
+            removes_at: None,
+        };
+        let outcome = Outcome {
+            repo: "~/app".into(),
+            skipped: None,
+            fetch_note: None,
+            started: vec![started("~/w/gone"), started("~/w/stays")],
+            removed: Vec::new(),
+            refused: vec![Refused {
+                path: "~/w/x".into(),
+                message: "locked".into(),
+            }],
+            pruned: false,
+            pruned_salvage: Vec::new(),
+            log: Vec::new(),
+            report: report(Vec::new(), None).repos.remove(0),
+        };
+        let mut pressure = volume(false, Vec::new());
+        pressure.removed = vec![reclaimed("~/w/gone", 1)];
+
+        let messages = notifications(&[outcome], &[pressure]);
+
+        let started: Vec<_> = messages
+            .iter()
+            .filter(|(title, _)| title == "reap: worktree to remove")
+            .collect();
+        assert_eq!(started.len(), 1);
+        assert!(started[0].1.starts_with("~/w/stays"));
+        assert!(messages.iter().any(|(title, _)| title == "reap: low disk"));
     }
 
     #[test]
