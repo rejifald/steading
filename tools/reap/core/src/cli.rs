@@ -203,16 +203,17 @@ fn sweep_command(
         println!("paused: nothing swept");
     }
     for outcome in &swept.repos {
-        print!("{}", describe(outcome));
+        print!("{}", describe(outcome, dry_run));
     }
     for pressure in &swept.volumes {
-        print!("{}", describe_pressure(pressure));
+        print!("{}", describe_pressure(pressure, dry_run));
     }
     Ok(())
 }
 
-/// What the pressure pass did about one volume, for the terminal; nothing for a healthy one.
-fn describe_pressure(pressure: &Pressure) -> String {
+/// What the pressure pass did about one volume, for the terminal; nothing for a healthy one. A dry
+/// run's `removed` holds what the pass would have removed, so its lines say `would`.
+fn describe_pressure(pressure: &Pressure, dry_run: bool) -> String {
     let volume = &pressure.volume;
     if !volume.is_low && pressure.removed.is_empty() && pressure.log.is_empty() {
         return String::new();
@@ -221,14 +222,16 @@ fn describe_pressure(pressure: &Pressure) -> String {
     lines.extend(pressure.log.iter().map(|line| format!("  {line}")));
     for reclaimed in &pressure.removed {
         lines.push(format!(
-            "  low disk: removed {} ({})",
+            "  low disk: {} {} ({})",
+            if dry_run { "would remove" } else { "removed" },
             reclaimed.removed.path,
             report::shown_size(reclaimed.bytes)
         ));
     }
     if !pressure.removed.is_empty() {
         lines.push(format!(
-            "  freed {} on {}",
+            "  {} {} on {}",
+            if dry_run { "would free" } else { "freed" },
             report::shown_size(pressure.freed_bytes),
             volume.name
         ));
@@ -253,8 +256,9 @@ fn describe_pressure(pressure: &Pressure) -> String {
     text
 }
 
-/// What a pass did to one repo, for the terminal.
-fn describe(outcome: &Outcome) -> String {
+/// What a pass did to one repo, for the terminal. A dry run's outcome holds what the pass would
+/// have done, so its lines say `would`: they must never read as a removal that happened.
+fn describe(outcome: &Outcome, dry_run: bool) -> String {
     let mut lines = vec![outcome.repo.clone()];
     if let Some(why) = &outcome.skipped {
         lines.push(format!("  skipped: {why}"));
@@ -271,12 +275,28 @@ fn describe(outcome: &Outcome) -> String {
             || "on confirm".to_string(),
             |time| format!("at {}", local_time(time)),
         );
+        let removes = if dry_run { "would remove" } else { "removes" };
         lines.push(format!(
-            "  removable {}: {}; removes {when}",
+            "  removable {}: {}; {removes} {when}",
             started.path, started.reason
         ));
     }
     for removed in &outcome.removed {
+        if dry_run {
+            // A dry run never asks git about the branch; it knows only that an unmerged one is kept.
+            let branch = match (&removed.branch, &removed.branch_kept) {
+                (Some(branch), Some(why)) => format!("; branch {branch} would be kept: {why}"),
+                (Some(branch), None) => format!(", then its branch {branch}"),
+                (None, _) => String::new(),
+            };
+            lines.push(format!("  would remove {}{branch}", removed.path));
+            if let Some(refname) = &removed.salvaged_to {
+                lines.push(format!(
+                    "    its uncommitted changes would be saved to {refname} first"
+                ));
+            }
+            continue;
+        }
         let branch = match (&removed.branch, &removed.branch_kept) {
             (Some(branch), Some(why)) => format!("; branch {branch} kept: {why}"),
             (Some(branch), None) => format!(" and its branch {branch}"),
@@ -298,8 +318,9 @@ fn describe(outcome: &Outcome) -> String {
     if outcome.pruned {
         lines.push("  pruned the entries of missing worktrees".into());
     }
+    let deleted = if dry_run { "would delete" } else { "deleted" };
     for refname in &outcome.pruned_salvage {
-        lines.push(format!("  deleted {refname}, past salvage_max_age"));
+        lines.push(format!("  {deleted} {refname}, past salvage_max_age"));
     }
     let mut text = lines.join("\n");
     text.push('\n');
@@ -341,6 +362,119 @@ mod tests {
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
         }
+    }
+
+    /// A pass that removed a salvaged worktree, started a clock and deleted an old save.
+    fn acted() -> Outcome {
+        Outcome {
+            repo: "~/Development/app".into(),
+            skipped: None,
+            fetch_note: None,
+            started: vec![sweep::Started {
+                path: "~/Development/app-next".into(),
+                reason: "merged into origin/main".into(),
+                removes_at: None,
+            }],
+            removed: vec![sweep::Removed {
+                path: "~/Development/app-feat".into(),
+                branch: Some("feat".into()),
+                branch_kept: None,
+                salvaged_to: Some("refs/reap/salvage/feat".into()),
+            }],
+            refused: Vec::new(),
+            pruned: false,
+            pruned_salvage: vec!["refs/reap/salvage/old".into()],
+            log: Vec::new(),
+            report: report::RepoReport {
+                name: "app".into(),
+                path: "~/Development/app".into(),
+                base: "origin/main".into(),
+                policy: crate::config::Policy::Auto,
+                gh_note: None,
+                error: None,
+                worktrees: Vec::new(),
+                salvaged: Vec::new(),
+            },
+        }
+    }
+
+    #[test]
+    fn a_dry_run_says_what_it_would_do_never_what_it_did() {
+        let text = describe(&acted(), true);
+
+        for done in ["removed", "removes", "deleted", " are in "] {
+            assert!(!text.contains(done), "{done:?} in a dry run:\n{text}");
+        }
+        assert!(text.contains("would remove ~/Development/app-feat, then its branch feat"));
+        assert!(text.contains("would be saved to refs/reap/salvage/feat"));
+        assert!(text.contains("would remove on confirm"));
+        assert!(text.contains("would delete refs/reap/salvage/old"));
+    }
+
+    #[test]
+    fn a_dry_run_forecasts_an_unmerged_branch_as_kept() {
+        let mut outcome = acted();
+        outcome.removed[0].branch_kept = Some("not merged".into());
+        let text = describe(&outcome, true);
+
+        assert!(text.contains(
+            "would remove ~/Development/app-feat; branch feat would be kept: not merged"
+        ));
+        assert!(!text.contains("then its branch"));
+    }
+
+    #[test]
+    fn a_real_pass_says_what_it_did() {
+        let text = describe(&acted(), false);
+
+        assert!(text.contains("removed ~/Development/app-feat and its branch feat"));
+        assert!(text.contains("uncommitted changes are in refs/reap/salvage/feat"));
+        assert!(text.contains("removes on confirm"));
+        assert!(text.contains("deleted refs/reap/salvage/old"));
+        assert!(!text.contains("would"));
+    }
+
+    #[test]
+    fn a_dry_run_pressure_pass_says_would() {
+        let pressure = Pressure {
+            volume: crate::pressure::VolumeStatus {
+                name: "Backup".into(),
+                mount: "/Volumes/Backup".into(),
+                total_bytes: 1000,
+                available_bytes: 10,
+                threshold_bytes: Some(100),
+                is_low: true,
+                removable: 1,
+                holders: Vec::new(),
+            },
+            removed: vec![crate::pressure::Reclaimed {
+                repo: "~/Development/app".into(),
+                removed: sweep::Removed {
+                    path: "~/Development/app-feat".into(),
+                    branch: None,
+                    branch_kept: None,
+                    salvaged_to: None,
+                },
+                bytes: 500,
+            }],
+            freed_bytes: 400,
+            refused: Vec::new(),
+            skipped: Vec::new(),
+            asked: Vec::new(),
+            announce_asked: false,
+            announce_stuck: false,
+            log: Vec::new(),
+        };
+
+        let dry = describe_pressure(&pressure, true);
+        assert!(dry.contains("would remove ~/Development/app-feat"));
+        assert!(dry.contains("would free"));
+        assert!(!dry.contains("removed"));
+        assert!(!dry.contains("freed"));
+
+        let real = describe_pressure(&pressure, false);
+        assert!(real.contains("low disk: removed ~/Development/app-feat"));
+        assert!(real.contains("freed"));
     }
 
     #[test]
