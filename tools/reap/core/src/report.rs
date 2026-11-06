@@ -22,6 +22,7 @@ use crate::in_use::WorkingDirectories;
 use crate::paths::Paths;
 use crate::pressure::{self, VolumeStatus};
 use crate::salvage::{self, Salvaged};
+use crate::servers::{self, Server, Snapshot};
 use crate::state_file::{self, RepoMemory};
 use crate::volume::{self, ReadVolume};
 use crate::worktree_list::{self, Worktree};
@@ -87,6 +88,10 @@ pub struct Row {
     /// end of `reason` (ADR 0006 rule 9).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub held_by: Option<String>,
+    /// The names of the processes inside it that are not servers or their idle launching
+    /// shells: shells, editors, agent sessions, which reap never stops (ADR 0005 rules 3 and 6).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub other_processes: Vec<String>,
 }
 
 /// One listed repo and its linked worktrees (never the main clone).
@@ -108,6 +113,8 @@ pub struct RepoReport {
     /// The saves of removed worktrees' changes, oldest first (ADR
     /// dirty-merged-worktrees-are-salvaged).
     pub salvaged: Vec<Salvaged>,
+    /// The dev servers running in its linked worktrees, merged or not (ADR 0005 rules 3 and 6).
+    pub servers: Vec<Server>,
 }
 
 /// The tray's three icon states (rule 15).
@@ -142,6 +149,9 @@ pub struct Report {
     pub repos: Vec<RepoReport>,
     /// Every volume that holds a listed repo's worktrees (ADR low-disk-skips-the-grace).
     pub volumes: Vec<VolumeStatus>,
+    /// Why the servers could not be listed; every `servers` is then empty (ADR 0005).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub servers_error: Option<String>,
 }
 
 /// Builds the report for every listed repo. Read-only: the grace clocks and *Keep*s come from
@@ -184,7 +194,51 @@ pub fn report_with(paths: &Paths, read_volume: &ReadVolume, now: DateTime<Utc>) 
         })
         .collect();
     let volumes = pressure::statuses(paths, read_volume, &repos, &reports);
-    Ok(summarize(paths, reports, volumes))
+    let mut report = summarize(paths, reports, volumes);
+    attach_servers(paths, &mut report, &directories);
+    Ok(report)
+}
+
+/// Fills every repo's `servers` and every row's `other_processes` from `directories`, the pass's
+/// one look at the processes' current directories (ADR 0005 rules 3 and 6), or says in
+/// `servers_error` why it could not. Display only: the *in use* guard (rule 5) is unchanged.
+pub fn attach_servers(
+    paths: &Paths,
+    report: &mut Report,
+    directories: &Result<WorkingDirectories, String>,
+) {
+    let snapshot = match directories {
+        Ok(directories) => Snapshot::read(directories).map_err(|e| format!("{e:#}")),
+        Err(why) => Err(why.clone()),
+    };
+    let snapshot = match snapshot {
+        Ok(snapshot) => snapshot,
+        Err(why) => {
+            report.servers_error = Some(why);
+            return;
+        }
+    };
+    for repo in &mut report.repos {
+        let worktrees: Vec<_> = repo
+            .worktrees
+            .iter()
+            .map(|row| paths.expand(&row.path))
+            .collect();
+        let mut inside = snapshot.inside(&worktrees);
+        repo.servers.clear();
+        for (row, worktree) in repo.worktrees.iter_mut().zip(&worktrees) {
+            let Some(here) = inside.remove(worktree) else {
+                row.other_processes.clear();
+                continue;
+            };
+            row.other_processes = snapshot.names(&here.others);
+            repo.servers.extend(
+                here.servers
+                    .iter()
+                    .map(|found| snapshot.server(paths, found)),
+            );
+        }
+    }
 }
 
 /// The totals and overall state of a set of repo reports and the volumes they sit on.
@@ -214,6 +268,7 @@ pub fn summarize(paths: &Paths, repos: Vec<RepoReport>, volumes: Vec<VolumeStatu
         needs_you,
         repos,
         volumes,
+        servers_error: None,
     }
 }
 
@@ -228,6 +283,7 @@ pub(crate) fn unreadable(paths: &Paths, repo: &Repo, error: &anyhow::Error) -> R
         error: Some(format!("{error:#}")),
         worktrees: Vec::new(),
         salvaged: Vec::new(),
+        servers: Vec::new(),
     }
 }
 
@@ -457,6 +513,7 @@ pub(crate) fn inspect(
             error: None,
             worktrees: rows,
             salvaged,
+            servers: Vec::new(),
         },
         worktrees: inspected,
     })
@@ -634,6 +691,7 @@ impl Pass<'_> {
             held_by: (state == State::Stale)
                 .then(|| classify::guard_of(&facts))
                 .flatten(),
+            other_processes: Vec::new(),
         };
         let inspected = Inspected {
             key,
@@ -969,6 +1027,16 @@ pub fn render(report: &Report) -> String {
         for line in salvage::described_apart(&repo.salvaged) {
             let _ = writeln!(out, "{line}");
         }
+        for server in &repo.servers {
+            let _ = writeln!(
+                out,
+                "  running    {}",
+                servers::describe(server, Utc::now())
+            );
+        }
+    }
+    if let Some(why) = &report.servers_error {
+        let _ = writeln!(out, "  servers could not be listed: {why}");
     }
     out
 }

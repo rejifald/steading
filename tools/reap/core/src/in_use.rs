@@ -1,14 +1,14 @@
 //! Which worktrees a process is running inside (rule 5): one `lsof -d cwd` per pass, matched
-//! by path prefix.
+//! by path prefix. The same pass tells [`crate::servers`] which process each directory belongs to.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 
-/// The current directories of every process this user can see.
+/// The current directories of every process this user can see, each with its process's pid.
 #[derive(Debug, Clone, Default)]
-pub struct WorkingDirectories(Vec<PathBuf>);
+pub struct WorkingDirectories(Vec<(u32, PathBuf)>);
 
 impl WorkingDirectories {
     /// Asks `lsof` for every process's current directory.
@@ -32,15 +32,26 @@ impl WorkingDirectories {
         Ok(Self::parse(&String::from_utf8_lossy(&output.stdout)))
     }
 
-    /// Parses `lsof -F n` output: one `n<path>` line per open current directory.
+    /// Parses `lsof -F n` output: a `p<pid>` line per process, then one `n<path>` line per open
+    /// current directory. A directory lsof printed before any pid gets pid 0, which matches no
+    /// process but still counts for [`Self::is_inside`].
+    #[must_use]
     pub fn parse(output: &str) -> Self {
-        Self(
-            output
-                .lines()
-                .filter_map(|line| line.strip_prefix('n'))
-                .map(PathBuf::from)
-                .collect(),
-        )
+        let mut pid = 0;
+        let mut directories = Vec::new();
+        for line in output.lines() {
+            if let Some(number) = line.strip_prefix('p') {
+                pid = number.parse().unwrap_or(0);
+            } else if let Some(path) = line.strip_prefix('n') {
+                directories.push((pid, PathBuf::from(path)));
+            }
+        }
+        Self(directories)
+    }
+
+    /// Every process's pid and current directory, as lsof listed them.
+    pub fn entries(&self) -> impl Iterator<Item = (u32, &Path)> {
+        self.0.iter().map(|(pid, path)| (*pid, path.as_path()))
     }
 
     /// Whether any process's current directory is `worktree` or inside it.
@@ -48,7 +59,7 @@ impl WorkingDirectories {
     pub fn is_inside(&self, worktree: &Path) -> bool {
         self.0
             .iter()
-            .any(|directory| directory.starts_with(worktree))
+            .any(|(_, directory)| directory.starts_with(worktree))
     }
 }
 
@@ -65,6 +76,14 @@ mod tests {
         assert!(directories.is_inside(Path::new("/w/other")));
         assert!(!directories.is_inside(Path::new("/w/fe")));
         assert!(!directories.is_inside(Path::new("/w/feature")));
+    }
+
+    #[test]
+    fn keeps_each_directory_with_its_pid() {
+        let directories = WorkingDirectories::parse("p41\nfcwd\nn/w/feat\np7\nfcwd\nn/\n");
+
+        let entries: Vec<_> = directories.entries().collect();
+        assert_eq!(entries, [(41, Path::new("/w/feat")), (7, Path::new("/"))]);
     }
 
     #[test]

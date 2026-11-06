@@ -14,6 +14,7 @@ use anyhow::Result;
 use chrono::Utc;
 use reap_core::config::{Config, DEFAULT_INTERVAL};
 use reap_core::ctx::Ctx;
+use reap_core::in_use::WorkingDirectories;
 use reap_core::report::{self, Report};
 use reap_core::sweep::{self, Swept};
 use tauri::AppHandle;
@@ -105,5 +106,10 @@ fn sweep_or_read(state: &State) -> Result<(Report, Swept)> {
         .iter()
         .map(|pressure| pressure.volume.clone())
         .collect();
-    Ok((report::summarize(&state.paths, repos, volumes), swept))
+    let mut report = report::summarize(&state.paths, repos, volumes);
+    // The sweep's passes read the processes per repo under each clone's lock; the servers are
+    // listed from one fresh look after them (ADR 0005 rule 6).
+    let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
+    report::attach_servers(&state.paths, &mut report, &directories);
+    Ok((report, swept))
 }

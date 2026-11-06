@@ -18,6 +18,7 @@ pub mod paths;
 pub mod pressure;
 pub mod report;
 pub mod salvage;
+pub mod servers;
 pub mod state_file;
 pub mod sweep;
 pub mod volume;

@@ -1,4 +1,4 @@
-//! The CLI (rule 14): `git reap status|sweep|salvage|salvaged|add|remove|discover|skip|unskip|keep|unkeep|pause|resume`. It
+//! The CLI (rule 14): `git reap status|sweep|salvage|salvaged|ps|stop|add|remove|discover|skip|unskip|keep|unkeep|pause|resume`. It
 //! reads git and the config directly; there is no IPC with the tray app.
 
 use std::ffi::OsString;
@@ -18,6 +18,7 @@ use crate::paths::{Paths, absolute};
 use crate::pressure::Pressure;
 use crate::report;
 use crate::salvage;
+use crate::servers::{self, StopState};
 use crate::sweep::{self, Outcome, Swept};
 
 /// How long an explicit `sweep` waits for another run to release a clone.
@@ -75,6 +76,26 @@ enum Command {
         /// The repo, by name or path, whose save `--delete` deletes, when several have the ref.
         #[arg(long, requires = "delete")]
         repo: Option<String>,
+    },
+    /// The dev servers running in listed clones' linked worktrees: every process group that
+    /// listens on a TCP port with a process inside one (ADR 0005).
+    Ps {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Stop one server: SIGTERM to its process group, up to 10 s for it to exit, then SIGHUP to
+    /// its idle launching shell. Never SIGKILL; only your own processes, only servers inside a
+    /// listed clone's linked worktree (ADR 0005).
+    Stop {
+        pid: u32,
+        /// The `started_at` that `ps --json` listed; refuses if the pid is now another process.
+        #[arg(long, value_name = "RFC3339")]
+        started_at: Option<String>,
+        /// Check everything and print the signals as `would run:`, sending none.
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// List a main clone in repos.toml (rule 1).
     Add {
@@ -182,6 +203,13 @@ fn dispatch(command: Command) -> Result<()> {
                 print!("{}", salvage::render(&salvaged));
             }
         }
+        Command::Ps { json } => ps_command(&paths, json)?,
+        Command::Stop {
+            pid,
+            started_at,
+            dry_run,
+            json,
+        } => stop_command(&paths, pid, started_at.as_deref(), dry_run, json)?,
         Command::Add { path, remote, base } => {
             let listed = add::add(&paths, &path, remote, base)?;
             println!("listed {listed}");
@@ -305,6 +333,78 @@ fn salvage_command(paths: Paths, worktree: &str, dry_run: bool) -> Result<()> {
         println!("  `git reap salvaged` says how to restore it, or delete the save");
     }
     Ok(())
+}
+
+/// `git reap ps`: one line per server and its command line, or the servers as JSON.
+fn ps_command(paths: &Paths, json: bool) -> Result<()> {
+    let servers = servers::list(paths)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&servers)?);
+        return Ok(());
+    }
+    if servers.is_empty() {
+        println!("no servers running in listed worktrees");
+    }
+    let now = Utc::now();
+    for server in &servers {
+        println!("{}", servers::describe(server, now));
+        println!("  {}", server.command);
+    }
+    Ok(())
+}
+
+/// `git reap stop <pid>`: exits 1 when the server is still running after the wait.
+fn stop_command(
+    paths: &Paths,
+    pid: u32,
+    started_at: Option<&str>,
+    dry_run: bool,
+    json: bool,
+) -> Result<()> {
+    let stopped = servers::stop(paths, pid, started_at, dry_run, servers::STOP_WAIT)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&stopped)?);
+    } else {
+        print!("{}", describe_stop(&stopped));
+    }
+    if stopped.state == StopState::StillRunning {
+        anyhow::bail!(
+            "pid {} is still running; reap does not send SIGKILL",
+            stopped.pid
+        );
+    }
+    Ok(())
+}
+
+/// What `git reap stop` did, for the terminal.
+fn describe_stop(stopped: &servers::Stopped) -> String {
+    let mut lines: Vec<String> = stopped.log.iter().map(|line| format!("  {line}")).collect();
+    let head = match stopped.state {
+        StopState::WouldStop => format!(
+            "dry run: would stop process group {} in {}",
+            stopped.pgid, stopped.worktree
+        ),
+        StopState::Stopped => format!(
+            "stopped process group {} in {}",
+            stopped.pgid, stopped.worktree
+        ),
+        StopState::StillRunning => {
+            let pids: Vec<String> = stopped.still_running.iter().map(u32::to_string).collect();
+            format!(
+                "process group {} in {} is still running: pid {}",
+                stopped.pgid,
+                stopped.worktree,
+                pids.join(", ")
+            )
+        }
+    };
+    lines.insert(0, head);
+    if let Some(shell) = stopped.hung_up {
+        lines.push(format!("  hung up its idle launching shell, pid {shell}"));
+    }
+    let mut text = lines.join("\n");
+    text.push('\n');
+    text
 }
 
 /// What the pressure pass did about one volume, for the terminal; nothing for a healthy one. A dry
@@ -473,6 +573,17 @@ mod tests {
             &["unkeep", "~/Development/app-feat"],
             &["pause"],
             &["resume"],
+            &["ps"],
+            &["ps", "--json"],
+            &["stop", "4121"],
+            &[
+                "stop",
+                "4121",
+                "--started-at",
+                "2026-11-05T09:01:02Z",
+                "--dry-run",
+            ],
+            &["stop", "4121", "--json"],
         ] {
             assert!(parse(args).is_ok(), "{args:?}");
         }
@@ -508,6 +619,7 @@ mod tests {
                 error: None,
                 worktrees: Vec::new(),
                 salvaged: Vec::new(),
+                servers: Vec::new(),
             },
         }
     }
@@ -603,5 +715,8 @@ mod tests {
         assert_eq!(run(["git-reap", "skip"]), 2);
         assert_eq!(run(["git-reap", "unskip"]), 2);
         assert_eq!(run(["git-reap", "discover", "--yaml"]), 2);
+        assert_eq!(run(["git-reap", "stop"]), 2);
+        assert_eq!(run(["git-reap", "stop", "node"]), 2);
+        assert_eq!(run(["git-reap", "ps", "--yaml"]), 2);
     }
 }

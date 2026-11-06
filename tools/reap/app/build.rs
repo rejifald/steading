@@ -12,6 +12,7 @@ const COMMANDS: &[&str] = &[
     "keep",
     "unkeep",
     "remove_now",
+    "stop_process",
     "find_clones",
     "add_suggestion",
     "skip_clone",
