@@ -44,6 +44,7 @@ then into a crate or package named for what it does (never `common` or `shared`)
 | `tools/<tool>/core/` | `<tool>-core`: the logic and the UI-free `git-<tool>` CLI. Builds and tests on Linux. |
 | `tools/<tool>/app/` | `<tool>-app`: the Tauri v2 menu-bar shell; the same binary is the CLI. macOS only. |
 | `tools/<tool>/app/ui/` | The popover: React, Base UI and Tailwind; a member of the root npm workspace. |
+| `crates/` | Rust crates both tools use: `find-clones` (the clone walk, [ADR 0004](docs/adr/0004-each-tool-suggests-the-clones-it-finds.md)) and `command-grants` (the build fails unless an app's `capabilities/popover.json` grants exactly the commands `src/tray.rs` registers). |
 | `packages/tray-popover/` | `@steading/tray-popover`: the controls, icons and popover pieces both popovers use. Source-only. [README](packages/tray-popover/README.md), [ADR 0003](docs/adr/0003-the-popovers-share-one-npm-workspace.md). |
 | `tools/<tool>/docs/` | The tool's ADRs, styleguide, brand and design notes. |
 | `docs/adr/` | Decisions that cover the whole repository. |
