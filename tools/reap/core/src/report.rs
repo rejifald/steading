@@ -712,8 +712,11 @@ impl Pass<'_> {
         };
         // A check that could not be made is not an answer: GitHub did not say whether it merged,
         // or `lsof` could not say whether a process runs in it.
-        let undecided = (self.gh_failed.get() && facts.merge.is_none() && !facts.is_missing)
-            || matches!(facts.in_use, InUse::Unknown(_));
+        // A verdict already reached without GitHub (a pushed-stale worktree is removable with no
+        // merge) stands: a failed question cannot overturn it.
+        let undecided = !matches!(state, State::Removable | State::Missing)
+            && ((self.gh_failed.get() && facts.merge.is_none() && !facts.is_missing)
+                || matches!(facts.in_use, InUse::Unknown(_)));
         let inspected = Inspected {
             key,
             branch,

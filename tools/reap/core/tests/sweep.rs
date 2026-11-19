@@ -167,6 +167,25 @@ fn a_pushed_stale_worktree_is_removed_and_its_branch_kept() {
 }
 
 #[test]
+fn a_pushed_stale_worktree_is_removed_though_github_answers_nothing() {
+    let mut sandbox = Sandbox::new();
+    let idle = sandbox.worktree("idle");
+    commit(&idle, "idle");
+    git(&sandbox.clone, &["push", "--quiet", "origin", "idle"]);
+    sandbox.use_github_url();
+    // Signed out: every `gh` call fails, yet the verdict never needed GitHub.
+    sandbox.fake_gh_routes(&[]);
+    sandbox.list_clone();
+
+    let first = sweep_at(&sandbox, later(21 * 24));
+    let due = sweep_at(&sandbox, later(22 * 24 + 1));
+
+    assert_eq!(first.started.len(), 1);
+    assert!(!idle.exists());
+    assert_eq!(due.removed.len(), 1);
+}
+
+#[test]
 fn guards_keep_dirty_locked_and_busy_worktrees_past_their_grace() {
     let sandbox = Sandbox::new();
     let dirty = sandbox.worktree("dirty");
