@@ -107,21 +107,30 @@ const NODE_FIELDS: &str = "number state headRefName headRefOid baseRefName url";
 
 /// The pull requests whose head is one of `branches`, which the newest-first list missed
 /// (ADR 0002, rule 3): one GraphQL call per [`LOOKUP_BATCH`] branches. A failed call finds
-/// nothing, which can only keep a worktree unmerged.
+/// nothing, which can only keep a worktree unmerged; the `bool` says whether one failed.
 #[must_use]
-pub fn lookup_heads(gh: &OsStr, dir: &Path, repo: &str, branches: &[String]) -> Vec<PullRequest> {
+pub fn lookup_heads(
+    gh: &OsStr,
+    dir: &Path,
+    repo: &str,
+    branches: &[String],
+) -> (Vec<PullRequest>, bool) {
     let Some((owner, name)) = repo.split_once('/') else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
-    branches
+    let mut has_failed = false;
+    let found = branches
         .chunks(LOOKUP_BATCH)
         .flat_map(|chunk| {
             let query = lookup_query(owner, name, chunk);
-            api(gh, dir, &["graphql", "-f", &format!("query={query}")])
+            let answer = api(gh, dir, &["graphql", "-f", &format!("query={query}")]);
+            has_failed |= answer.is_none();
+            answer
                 .map(|stdout| parse_lookup(&stdout))
                 .unwrap_or_default()
         })
-        .collect()
+        .collect();
+    (found, has_failed)
 }
 
 fn lookup_query(owner: &str, name: &str, branches: &[String]) -> String {
@@ -178,24 +187,29 @@ pub fn associated(
     dir: &Path,
     repo: &str,
     heads: &[String],
-) -> BTreeMap<String, Vec<PullRequest>> {
+) -> (BTreeMap<String, Vec<PullRequest>>, bool) {
     let mut found: BTreeMap<String, Vec<PullRequest>> = BTreeMap::new();
+    let mut has_failed = false;
     let Some((owner, name)) = repo.split_once('/') else {
-        return found;
+        return (found, has_failed);
     };
     // `object(oid:)` needs the full object name; anything else is an error for the whole call.
     let heads: Vec<&String> = heads.iter().filter(|head| is_full_sha(head)).collect();
     for chunk in heads.chunks(LOOKUP_BATCH) {
         let query = associated_query(owner, name, chunk);
-        let answer = api(gh, dir, &["graphql", "-f", &format!("query={query}")])
+        // A failed call answers nothing for its heads, so a later look in the pass asks again.
+        let Some(answer) = api(gh, dir, &["graphql", "-f", &format!("query={query}")])
             .map(|stdout| parse_associated(&stdout))
-            .unwrap_or_default();
+        else {
+            has_failed = true;
+            continue;
+        };
         for (index, head) in chunk.iter().enumerate() {
             let pull_requests = answer.get(&index).cloned().unwrap_or_default();
             found.insert((*head).clone(), pull_requests);
         }
     }
-    found
+    (found, has_failed)
 }
 
 /// 40 hex digits (SHA-1) or 64 (SHA-256).
@@ -256,20 +270,35 @@ fn parse_associated(stdout: &[u8]) -> BTreeMap<usize, Vec<PullRequest>> {
 }
 
 /// Whether GitHub holds `ancestor` as an ancestor of, or equal to, `of` (ADR 0002, rule 1). A
-/// commit GitHub does not have, a failed call or any other answer is `false`.
+/// commit GitHub does not have (a 404) or any other answer is `Some(false)`; `None` when `gh`
+/// could not be asked or failed otherwise (offline, rate limited), so the caller knows it does
+/// not know.
 #[must_use]
-pub fn contains(gh: &OsStr, dir: &Path, repo: &str, ancestor: &str, of: &str) -> bool {
+pub fn contains(gh: &OsStr, dir: &Path, repo: &str, ancestor: &str, of: &str) -> Option<bool> {
     let endpoint = format!("repos/{repo}/compare/{ancestor}...{of}");
-    api(gh, dir, &[&endpoint, "--jq", ".status"]).is_some_and(|stdout| {
-        matches!(
+    match api_result(gh, dir, &[&endpoint, "--jq", ".status"])? {
+        Ok(stdout) => Some(matches!(
             String::from_utf8_lossy(&stdout).trim(),
             "ahead" | "identical"
-        )
-    })
+        )),
+        Err(stderr) if is_not_found(&stderr) => Some(false),
+        Err(_) => None,
+    }
+}
+
+/// GitHub's answer for a commit or ref it does not have.
+fn is_not_found(stderr: &str) -> bool {
+    stderr.contains("HTTP 404") || stderr.contains("Not Found")
 }
 
 /// `gh api <args>`'s stdout, or `None` when it fails.
 fn api(gh: &OsStr, dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    api_result(gh, dir, args)?.ok()
+}
+
+/// `gh api <args>`: `None` when `gh` could not start, else its stdout or, when it failed, its
+/// stderr.
+fn api_result(gh: &OsStr, dir: &Path, args: &[&str]) -> Option<Result<Vec<u8>, String>> {
     let output = Command::new(gh)
         .current_dir(dir)
         .arg("api")
@@ -278,12 +307,23 @@ fn api(gh: &OsStr, dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
         .env("NO_COLOR", "1")
         .output()
         .ok()?;
-    output.status.success().then_some(output.stdout)
+    Some(if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_404_says_github_lacks_the_commit_any_other_failure_is_unknown() {
+        assert!(is_not_found("gh: Not Found (HTTP 404)"));
+        assert!(!is_not_found("gh: API rate limit exceeded (HTTP 403)"));
+        assert!(!is_not_found("error connecting to api.github.com"));
+    }
 
     #[test]
     fn a_lookup_asks_for_each_branch_as_a_string_literal() {

@@ -2,9 +2,11 @@
 //! are on runs low on space, its removable worktrees go largest first, without waiting out their
 //! grace, until the volume is healthy again.
 //!
-//! Every removal goes through the guarded path of a normal one ([`sweep::remove_checked`]): the
-//! worktree is judged again under its repo's lock, git is never forced beyond what rules 4 and
-//! 11 allow, and a repo another run or git-tether holds is skipped until the next tick. Only
+//! Every removal goes through the guarded path of a normal one ([`sweep::Judged`]): each repo is
+//! inspected once under its lock when its first candidate comes up, and every candidate is
+//! judged against that inspection, with a fresh look for processes after the first removal (ADR
+//! unanswered-checks-keep-the-clock). git is never forced beyond what rules 4 and 11 allow, and
+//! a repo another run or git-tether holds is skipped until the next tick. Only
 //! `State::Removable` worktrees of `policy = "auto"` repos are candidates; `policy = "ask"`
 //! repos are reported for a notification, and dirty, kept, in-use and locked worktrees are
 //! named as what still holds the space.
@@ -23,7 +25,7 @@ use crate::ctx::Ctx;
 use crate::paths::Paths;
 use crate::report::{self, RepoReport};
 use crate::state_file::{self, VolumeMemory};
-use crate::sweep::{self, Attempt, Refused, Removed};
+use crate::sweep::{self, Attempt, Judged, Refused, Removed};
 use crate::volume::{ReadVolume, Volume};
 
 /// A worktree that holds space on a low volume, and why reap does not free it.
@@ -457,12 +459,34 @@ pub(crate) fn pass(ctx: &Ctx, repos: &[Repo], now: DateTime<Utc>) -> Result<Vec<
 struct Attempts {
     /// Repos another writer held: the rest of their worktrees wait for the next tick.
     busy: HashSet<usize>,
+    /// Repos held and inspected for this volume, by index: one inspection serves all of a
+    /// repo's candidates, and the locks are released when the volume is done.
+    held: BTreeMap<usize, Judged>,
     removed: Vec<Reclaimed>,
     refused: Vec<Refused>,
     skipped: Vec<Refused>,
 }
 
 impl Attempts {
+    /// The repo's lock and inspection, taken the first time one of its candidates comes up.
+    fn judged(
+        &mut self,
+        ctx: &Ctx,
+        repo: &Repo,
+        index: usize,
+        now: DateTime<Utc>,
+    ) -> Result<Result<&mut Judged, String>> {
+        Ok(match self.held.entry(index) {
+            std::collections::btree_map::Entry::Occupied(held) => Ok(held.into_mut()),
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                match Judged::take(ctx, repo, Duration::ZERO, None, now)? {
+                    Ok(judged) => Ok(slot.insert(judged)),
+                    Err(why) => Err(why),
+                }
+            }
+        })
+    }
+
     /// Tries to remove `candidate` through the guarded path. Answers with the volume's free
     /// space after a removal, `None` when nothing was removed.
     fn remove(
@@ -477,7 +501,12 @@ impl Attempts {
         if self.busy.contains(&candidate.repo) {
             return None;
         }
-        let attempt = sweep::remove_checked(ctx, repo, &candidate.key, Duration::ZERO, false, now);
+        let attempt = self
+            .judged(ctx, repo, candidate.repo, now)
+            .and_then(|judged| match judged {
+                Ok(judged) => judged.remove(ctx, repo, &candidate.key, now),
+                Err(why) => Ok(Attempt::Busy(why)),
+            });
         let message = match attempt {
             Ok(Attempt::Removed(removed)) => {
                 self.removed.push(Reclaimed {
@@ -554,6 +583,7 @@ fn relieve(
         removed,
         refused,
         skipped,
+        ..
     } = attempts;
     let still_removable = eligible
         .iter()

@@ -1,6 +1,7 @@
 # ADR 0005: on a low disk, removable worktrees go without waiting out their grace
 
-- **Status:** Accepted
+- **Status:** Accepted; rule 2 amended by
+  [ADR unanswered-checks-keep-the-clock](0007-unanswered-checks-keep-the-clock.md)
 - **Date:** 2026-11-05
 - **Amends:** [ADR 0001](0001-reap-sweeps-merged-worktrees.md), rule 10
 

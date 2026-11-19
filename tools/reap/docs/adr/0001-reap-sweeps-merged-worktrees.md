@@ -5,7 +5,8 @@
   [ADR 0003](0003-pushed-stale-worktrees-are-removed.md), rules 4, 6, 10 and 11 by
   [ADR dirty-merged-worktrees-are-salvaged](0004-dirty-merged-worktrees-are-salvaged.md), rule
   10 by [ADR low-disk-skips-the-grace](0005-low-disk-skips-the-grace.md), rules 3, 13 and 15 by
-  [ADR 0006](0006-abandoned-worktrees-are-saved-then-offered.md)
+  [ADR 0006](0006-abandoned-worktrees-are-saved-then-offered.md), rule 10 by
+  [ADR unanswered-checks-keep-the-clock](0007-unanswered-checks-keep-the-clock.md)
 - **Date:** 2026-10-28
 
 `reap` is a menu-bar app on a developer's Mac that finds the linked worktrees of the clones

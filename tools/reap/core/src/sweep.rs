@@ -116,10 +116,19 @@ pub(crate) fn plan(
             && worktree.facts.lock_reason.is_none()
     });
     for worktree in worktrees {
+        let head = worktree.head.clone().unwrap_or_default();
+        // A check could not be made (GitHub did not answer, `lsof` failed), so it may still be
+        // removable: its clock survives the pass, but nothing is removed on a judgement that was
+        // never made (ADR unanswered-checks-keep-the-clock).
+        if worktree.undecided {
+            if let Some(clock) = memory.clock(&worktree.key, &head) {
+                plan.clocks.insert(worktree.key.clone(), clock.clone());
+            }
+            continue;
+        }
         if !matches!(worktree.state, State::Removable | State::Missing) {
             continue;
         }
-        let head = worktree.head.clone().unwrap_or_default();
         let clock = if let Some(clock) = memory.clock(&worktree.key, &head) {
             clock.clone()
         } else {
@@ -641,54 +650,121 @@ pub(crate) fn remove_checked(
     retry_refusal: bool,
     now: DateTime<Utc>,
 ) -> Result<Attempt> {
-    let paths = &ctx.paths;
-    let common_dir = git::path_of(&paths.git, &repo.path, &["rev-parse", "--git-common-dir"])?;
-    let _lock = match lock::acquire(&common_dir, wait)? {
-        Ok(lock) => lock,
-        Err(why) => return Ok(Attempt::Busy(why)),
-    };
-    let prepared = report::prepare(paths, repo)?;
-    let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
-    let mut memory = state_file::load(paths)
-        .remove(&paths.tilde(&repo.path))
-        .unwrap_or_default();
-    if retry_refusal {
-        memory.refusals.remove(key);
+    let retry = retry_refusal.then_some(key);
+    match Judged::take(ctx, repo, wait, retry, now)? {
+        Ok(mut judged) => judged.remove(ctx, repo, key, now),
+        Err(why) => Ok(Attempt::Busy(why)),
     }
-    let inspection = report::inspect(paths, repo, &prepared, &directories, &memory, now)?;
-    let (worktree, row) = inspection
-        .worktrees
-        .iter()
-        .zip(&inspection.report.worktrees)
-        .find(|(worktree, _)| worktree.key == key)
-        .context("the worktree disappeared while reap looked at it")?;
-    if worktree.state != State::Removable {
-        return Ok(Attempt::NotRemovable(row.reason.clone()));
+}
+
+/// A repo held under its lock and inspected once, so several worktrees can be removed in a row
+/// without inspecting every worktree again for each (the pressure pass). Each removal still
+/// runs every guard of rules 3 to 6 and 11 against that inspection, made under the lock.
+pub(crate) struct Judged {
+    _lock: lock::RepoLock,
+    inspection: report::Inspection,
+    /// Removals made so far.
+    removals: usize,
+    /// Read before the second removal: a process that started inside a worktree since the
+    /// inspection keeps it, as in a pass ([`locked_pass`]).
+    fresh: Option<WorkingDirectories>,
+}
+
+impl Judged {
+    /// Takes `repo`'s lock and inspects it. `Ok(Err(why))` when another writer holds it. With
+    /// `retry`, the refusal recorded for that worktree is dropped first, so it is judged again.
+    pub(crate) fn take(
+        ctx: &Ctx,
+        repo: &Repo,
+        wait: Duration,
+        retry: Option<&str>,
+        now: DateTime<Utc>,
+    ) -> Result<Result<Self, String>> {
+        let paths = &ctx.paths;
+        let common_dir = git::path_of(&paths.git, &repo.path, &["rev-parse", "--git-common-dir"])?;
+        let lock = match lock::acquire(&common_dir, wait)? {
+            Ok(lock) => lock,
+            Err(why) => return Ok(Err(why)),
+        };
+        let prepared = report::prepare(paths, repo)?;
+        let directories = WorkingDirectories::read().map_err(|e| format!("{e:#}"));
+        let mut memory = state_file::load(paths)
+            .remove(&paths.tilde(&repo.path))
+            .unwrap_or_default();
+        if let Some(key) = retry {
+            memory.refusals.remove(key);
+        }
+        let inspection = report::inspect(paths, repo, &prepared, &directories, &memory, now)?;
+        Ok(Ok(Self {
+            _lock: lock,
+            inspection,
+            removals: 0,
+            fresh: None,
+        }))
     }
-    let removed = remove(ctx, repo, worktree, now)?;
-    if !ctx.dry_run {
-        state_file::update(paths, &paths.tilde(&repo.path), |memory| {
-            memory.clocks.remove(key);
-            match &removed {
-                Ok(_) => {
-                    memory.refusals.remove(key);
-                }
-                Err(message) => {
-                    memory.refusals.insert(
-                        key.to_string(),
-                        Refusal {
-                            head: worktree.head.clone().unwrap_or_default(),
-                            message: message.clone(),
-                        },
-                    );
-                }
+
+    /// Removes the worktree `key` if the inspection found it removable and no process has
+    /// started inside it since.
+    pub(crate) fn remove(
+        &mut self,
+        ctx: &Ctx,
+        repo: &Repo,
+        key: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Attempt> {
+        let paths = &ctx.paths;
+        let (worktree, row) = self
+            .inspection
+            .worktrees
+            .iter()
+            .zip(&self.inspection.report.worktrees)
+            .find(|(worktree, _)| worktree.key == key)
+            .context("the worktree disappeared while reap looked at it")?;
+        if worktree.state != State::Removable {
+            return Ok(Attempt::NotRemovable(row.reason.clone()));
+        }
+        if self.removals > 0 {
+            if self.fresh.is_none() {
+                self.fresh = Some(
+                    WorkingDirectories::read().context("checking for processes before removing")?,
+                );
             }
-        })?;
+            if self
+                .fresh
+                .as_ref()
+                .is_some_and(|fresh| fresh.is_inside(&paths.expand(key)))
+            {
+                return Ok(Attempt::NotRemovable(
+                    "a process started inside it".to_string(),
+                ));
+            }
+        }
+        let removed = remove(ctx, repo, worktree, now)?;
+        self.removals += 1;
+        if !ctx.dry_run {
+            state_file::update(paths, &paths.tilde(&repo.path), |memory| {
+                memory.clocks.remove(key);
+                match &removed {
+                    Ok(_) => {
+                        memory.refusals.remove(key);
+                    }
+                    Err(message) => {
+                        memory.refusals.insert(
+                            key.to_string(),
+                            Refusal {
+                                head: worktree.head.clone().unwrap_or_default(),
+                                message: message.clone(),
+                            },
+                        );
+                    }
+                }
+            })?;
+        }
+        Ok(match removed {
+            Ok(removed) => Attempt::Removed(removed),
+            Err(message) => Attempt::Refused(message),
+        })
     }
-    Ok(match removed {
-        Ok(removed) => Attempt::Removed(removed),
-        Err(message) => Attempt::Refused(message),
-    })
 }
 
 /// *Save and remove* and `git reap salvage <worktree>` (ADR 0006 rules 6 and 7): under the
@@ -810,6 +886,7 @@ mod tests {
             head: Some(head.into()),
             facts: Facts::default(),
             state,
+            undecided: false,
         }
     }
 
@@ -882,6 +959,32 @@ mod tests {
         );
 
         assert!(plan.clocks.is_empty() && plan.removals.is_empty());
+    }
+
+    #[test]
+    fn a_worktree_github_could_not_judge_keeps_its_clock_and_is_not_removed() {
+        let mut memory = RepoMemory::default();
+        memory.clocks.insert("~/w".into(), clock("a", 48));
+        memory
+            .clocks
+            .insert("~/moved".into(), clock("old-head", 48));
+        let undecided = |key: &str, head: &str| Inspected {
+            undecided: true,
+            ..worktree(key, head, State::Open)
+        };
+
+        let plan = plan(
+            &[undecided("~/w", "a"), undecided("~/moved", "new-head")],
+            &memory,
+            Policy::Auto,
+            DAY,
+            now(),
+        );
+
+        assert_eq!(plan.clocks["~/w"], clock("a", 48));
+        assert!(plan.removals.is_empty() && plan.started.is_empty());
+        // New commits still end the clock: it is kept only at the HEAD it was started at.
+        assert!(!plan.clocks.contains_key("~/moved"));
     }
 
     #[test]

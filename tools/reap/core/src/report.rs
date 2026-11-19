@@ -3,7 +3,7 @@
 //! (ADRs 0002 and 0006): it judges against the remote-tracking refs as they are, so a stale ref
 //! can only make a worktree look unmerged, never merged (rule 8).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -298,6 +298,10 @@ pub(crate) struct Prepared {
     /// The pull requests associated with each HEAD asked about so far in this pass (ADR 0006),
     /// so a pass that looks twice asks GitHub once.
     associated: RefCell<BTreeMap<String, Vec<PullRequest>>>,
+    /// A question to GitHub failed in this pass (offline, rate limited, signed out): a worktree
+    /// it left unmerged may be merged after all, so its grace clock is kept (ADR
+    /// unanswered-checks-keep-the-clock).
+    gh_failed: Cell<bool>,
 }
 
 impl Prepared {
@@ -322,12 +326,12 @@ impl Prepared {
         asking.sort();
         asking.dedup();
         if !asking.is_empty() {
-            cache.extend(github::associated(
-                &paths.gh,
-                &repo.path,
-                github_repo,
-                &asking,
-            ));
+            let (found, has_failed) =
+                github::associated(&paths.gh, &repo.path, github_repo, &asking);
+            cache.extend(found);
+            if has_failed {
+                self.gh_failed.set(true);
+            }
         }
         heads
             .iter()
@@ -362,23 +366,23 @@ pub(crate) fn prepare(paths: &Paths, repo: &Repo) -> Result<Prepared> {
         pull_requests: Vec::new(),
         github_repo: None,
         associated: RefCell::default(),
+        gh_failed: Cell::new(false),
         base_ref,
     };
     match (listed, github_repo) {
         (PullRequests::Listed(mut pull_requests), Some(github_repo)) => {
             let missed = branches_missed(paths, repo, &pull_requests);
             if !missed.is_empty() {
-                pull_requests.extend(github::lookup_heads(
-                    &paths.gh,
-                    &repo.path,
-                    &github_repo,
-                    &missed,
-                ));
+                let (found, has_failed) =
+                    github::lookup_heads(&paths.gh, &repo.path, &github_repo, &missed);
+                pull_requests.extend(found);
+                prepared.gh_failed.set(has_failed);
             }
             prepared.pull_requests = pull_requests;
             prepared.github_repo = Some(github_repo);
         }
-        (PullRequests::Unavailable(why), _) => {
+        (PullRequests::Unavailable(why), is_on_github) => {
+            prepared.gh_failed.set(is_on_github.is_some());
             prepared.gh_note = Some(format!(
                 "{why}: only merges into {} are seen",
                 shown(&prepared.base_ref)
@@ -420,6 +424,10 @@ pub(crate) struct Inspected {
     pub head: Option<String>,
     pub facts: Facts,
     pub state: State,
+    /// Not judged removable only because a check could not be made in this pass (GitHub did not
+    /// answer, or `lsof` failed): a sweep keeps its grace clock but removes nothing on it (ADR
+    /// unanswered-checks-keep-the-clock).
+    pub undecided: bool,
 }
 
 /// A repo's report, with what a sweep needs to act on each row.
@@ -471,6 +479,7 @@ pub(crate) fn inspect(
         base_ref: &prepared.base_ref,
         pull_requests: &prepared.pull_requests,
         github_repo: prepared.github_repo.as_deref(),
+        gh_failed: &prepared.gh_failed,
         directories,
         memory,
         now,
@@ -509,7 +518,13 @@ pub(crate) fn inspect(
             path: paths.tilde(&repo.path),
             base: shown(&prepared.base_ref),
             policy: repo.policy,
-            gh_note: prepared.gh_note.clone(),
+            gh_note: prepared.gh_note.clone().or_else(|| {
+                prepared.gh_failed.get().then(|| {
+                    "gh did not answer every question: a worktree it could not judge keeps its \
+                     grace clock until it can"
+                        .to_string()
+                })
+            }),
             error: None,
             worktrees: rows,
             salvaged,
@@ -573,6 +588,8 @@ struct Pass<'a> {
     base_ref: &'a str,
     pull_requests: &'a [PullRequest],
     github_repo: Option<&'a str>,
+    /// Set when a question to GitHub fails; see [`Prepared`].
+    gh_failed: &'a Cell<bool>,
     directories: &'a Result<WorkingDirectories, String>,
     memory: &'a RepoMemory,
     now: DateTime<Utc>,
@@ -693,12 +710,17 @@ impl Pass<'_> {
                 .flatten(),
             other_processes: Vec::new(),
         };
+        // A check that could not be made is not an answer: GitHub did not say whether it merged,
+        // or `lsof` could not say whether a process runs in it.
+        let undecided = (self.gh_failed.get() && facts.merge.is_none() && !facts.is_missing)
+            || matches!(facts.in_use, InUse::Unknown(_));
         let inspected = Inspected {
             key,
             branch,
             head,
             facts,
             state,
+            undecided,
         };
         (row, inspected)
     }
@@ -884,7 +906,12 @@ impl Pass<'_> {
             return git::is_ancestor(git, repo, head, merged_head);
         }
         self.github_repo.is_some_and(|github_repo| {
-            github::contains(&self.paths.gh, repo, github_repo, head, merged_head)
+            github::contains(&self.paths.gh, repo, github_repo, head, merged_head).unwrap_or_else(
+                || {
+                    self.gh_failed.set(true);
+                    false
+                },
+            )
         })
     }
 

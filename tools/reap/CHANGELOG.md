@@ -81,3 +81,11 @@ All notable changes to this project are documented in this file. The format foll
 - A pass could find a clone busy just after the previous one released its lock, while
   another thread was starting a process. A lock that looks held is now retried for 50 ms,
   even with no wait.
+
+- A merged worktree no longer waits forever when a pass cannot reach GitHub
+  ([ADR unanswered-checks-keep-the-clock](docs/adr/0007-unanswered-checks-keep-the-clock.md)):
+  a failed `gh` call (offline, rate limited, signed out) or a failed `lsof` leaves the worktree
+  undecided, which keeps its grace clock instead of restarting it, and `status` notes the failed
+  call. A failed `compare` was read as "not merged" before.
+- A pressure pass inspects each repo once under its lock instead of once per worktree it
+  removes; a dry run over 84 worktrees with 33 to remove took over an hour.
