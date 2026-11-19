@@ -304,3 +304,53 @@ fn a_repo_another_run_holds_is_skipped_and_its_worktree_waits() {
     // Busy is not stuck: the next tick tries again.
     assert!(!pressure.announce_stuck);
 }
+
+/// Installs a fake `gh` that answers `pr list` with no pull requests and logs every call, so a
+/// test can count how often a repo is inspected: each inspection lists its pull requests once.
+fn count_inspections(sandbox: &mut Sandbox) -> PathBuf {
+    sandbox.use_github_url();
+    let log = sandbox.root.join("gh-calls.log");
+    let script = format!(
+        "#!/bin/sh\necho \"$*\" >> '{}'\ncase \"$*\" in\n  \"pr list\"*) echo '[]' ;;\n  *) exit 1 ;;\nesac\n",
+        log.display()
+    );
+    let file = sandbox.root.join("gh");
+    std::fs::write(&file, script).unwrap();
+    sandbox::make_executable(&file);
+    sandbox.paths.gh = file.into();
+    log
+}
+
+fn pull_request_lists(log: &PathBuf) -> usize {
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter(|line| line.starts_with("pr list"))
+        .count()
+}
+
+/// One inspection per repo serves all of its removals: a repo with 84 worktrees and 33 to remove
+/// must not be inspected 33 times over (it took a dry run over an hour).
+#[test]
+fn a_low_volume_inspects_each_repo_once_however_many_worktrees_go() {
+    let inspections = |count: u64| {
+        let mut world = World::new(1);
+        let log = count_inspections(&mut world.sandbox);
+        let paths: Vec<_> = (0..count)
+            .map(|index| world.worktree(&format!("w{index}"), 1))
+            .collect();
+        world.sandbox.list_clone();
+
+        let swept = world.sweep();
+
+        assert_eq!(
+            removed_paths(&swept).len(),
+            paths.len(),
+            "{count} worktrees"
+        );
+        assert!(paths.iter().all(|path| !path.exists()));
+        pull_request_lists(&log)
+    };
+
+    assert_eq!(inspections(1), inspections(4));
+}

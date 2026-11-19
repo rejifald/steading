@@ -97,6 +97,36 @@ fn a_squash_merged_branch_is_deleted_on_ghs_proof() {
 }
 
 #[test]
+fn a_pass_github_does_not_answer_keeps_the_grace_clock() {
+    let mut sandbox = Sandbox::new();
+    let squashed = sandbox.worktree("squashed");
+    let head = commit(&squashed, "squashed");
+    sandbox.use_github_url();
+    let merged = format!(
+        r#"[{{"number":12,"state":"MERGED","headRefName":"squashed","headRefOid":"{head}","baseRefName":"main","url":"u"}}]"#
+    );
+    sandbox.fake_gh(&merged);
+    sandbox.list_clone();
+
+    let first = sweep_at(&sandbox, Utc::now());
+    // Offline, rate limited or signed out: every `gh` call fails.
+    sandbox.fake_gh_routes(&[]);
+    let offline = sweep_at(&sandbox, later(12));
+    let survived_offline = squashed.exists();
+    sandbox.fake_gh(&merged);
+    let due = sweep_at(&sandbox, later(25));
+
+    assert_eq!(first.started.len(), 1);
+    // Only GitHub knows it merged, so it cannot be judged removable, and nothing is removed...
+    assert_eq!(offline.report.worktrees[0].state, State::Open);
+    assert!(offline.report.gh_note.is_some());
+    assert!(survived_offline && offline.started.is_empty());
+    // ...but its clock was not restarted, so it goes when its first grace is up.
+    assert_eq!(due.removed.len(), 1);
+    assert!(!squashed.exists());
+}
+
+#[test]
 fn a_branch_behind_its_merged_pull_request_is_deleted_on_ghs_proof() {
     let mut sandbox = Sandbox::new();
     let behind = sandbox.worktree("behind");
@@ -134,6 +164,25 @@ fn a_pushed_stale_worktree_is_removed_and_its_branch_kept() {
     assert!(!idle.exists());
     assert_eq!(due.removed[0].branch_kept.as_deref(), Some("not merged"));
     assert!(branch_exists(&sandbox, "idle"));
+}
+
+#[test]
+fn a_pushed_stale_worktree_is_removed_though_github_answers_nothing() {
+    let mut sandbox = Sandbox::new();
+    let idle = sandbox.worktree("idle");
+    commit(&idle, "idle");
+    git(&sandbox.clone, &["push", "--quiet", "origin", "idle"]);
+    sandbox.use_github_url();
+    // Signed out: every `gh` call fails, yet the verdict never needed GitHub.
+    sandbox.fake_gh_routes(&[]);
+    sandbox.list_clone();
+
+    let first = sweep_at(&sandbox, later(21 * 24));
+    let due = sweep_at(&sandbox, later(22 * 24 + 1));
+
+    assert_eq!(first.started.len(), 1);
+    assert!(!idle.exists());
+    assert_eq!(due.removed.len(), 1);
 }
 
 #[test]
