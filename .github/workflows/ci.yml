@@ -42,10 +42,10 @@ jobs:
         run: cargo fmt --all --check
       - name: Lint (crates, cores and CLIs)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
-        run: cargo clippy -p find-clones -p tether-core -p reap-core --all-targets --locked -- -D warnings
+        run: cargo clippy -p command-grants -p find-clones -p tether-core -p reap-core --all-targets --locked -- -D warnings
       - name: Test (crates, cores and CLIs)
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
-        run: cargo test -p find-clones -p tether-core -p reap-core --locked
+        run: cargo test -p command-grants -p find-clones -p tether-core -p reap-core --locked
       - name: UI install
         id: ui-install
         if: ${{ !cancelled() }}

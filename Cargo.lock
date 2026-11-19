@@ -432,6 +432,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "command-grants"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "cookie"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2434,6 +2441,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "command-grants",
  "reap-core",
  "serde",
  "tauri",
@@ -3360,6 +3368,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "command-grants",
  "find-clones",
  "serde",
  "tauri",

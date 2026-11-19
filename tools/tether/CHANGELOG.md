@@ -49,6 +49,10 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- The build now takes the app's commands from the invoke handler and fails unless
+  `capabilities/popover.json` grants exactly those, so a new command cannot ship that the
+  popover is not allowed to call (reap shipped two such commands).
+
 - A sync could be skipped as busy just after the previous one released its lock, while
   another thread was starting a process. A lock that looks held is now retried for 50 ms,
   even with no wait.

@@ -78,6 +78,11 @@ All notable changes to this project are documented in this file. The format foll
 
 ### Fixed
 
+- *Save and remove* and deleting a saved salvage failed with "Command … not allowed by ACL":
+  the app registered `save_and_remove` and `delete_salvaged` but never granted them to the
+  popover. The build now takes its commands from the invoke handler and fails unless
+  `capabilities/popover.json` grants exactly those.
+
 - A pass could find a clone busy just after the previous one released its lock, while
   another thread was starting a process. A lock that looks held is now retried for 50 ms,
   even with no wait.
