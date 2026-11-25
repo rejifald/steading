@@ -75,6 +75,10 @@ All notable changes to this project are documented in this file. The format foll
 - The popover groups worktrees by outcome across repos (*Needs you*, *Ready to remove*,
   *Merged, but held*, *In progress*, *Kept*), titles each row by its branch, says in a plain
   sentence what happens to it, and offers *Remove all* with a confirm.
+- A pass and the low-disk pass run up to 4 `git worktree remove` commands at once, so freeing
+  space is no longer one worktree at a time. Salvage saves, branch deletion and `state.json`
+  stay one at a time, and the low-disk pass still stops once its estimate says the volume is
+  healthy.
 
 ### Fixed
 

@@ -10,9 +10,16 @@
 //! no remote branch is deleted, and a main clone's checkout is never changed. On a low volume, the
 //! pressure pass (ADR low-disk-skips-the-grace) removes removable worktrees without their grace,
 //! through the same guarded [`remove_checked`].
+//!
+//! A removal has three phases. Preparing (the salvage save, the choice of arguments) and
+//! finishing (the branch, `state.json`) run one worktree at a time on the calling thread, so refs,
+//! branches and the state file are never written concurrently. Only the `git worktree remove`
+//! commands in between run side by side, up to [`PARALLEL_REMOVALS`] at once.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
+use std::process::Output;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -341,24 +348,28 @@ fn locked_pass(ctx: &Ctx, repo: &Repo, now: DateTime<Utc>, outcome: &mut Outcome
         Some(WorkingDirectories::read().context("checking for processes before removing")?)
     };
     let mut refusals = BTreeMap::new();
-    for path in &plan.removals {
-        let Some(worktree) = inspection
-            .worktrees
-            .iter()
-            .find(|worktree| &worktree.key == path)
-        else {
-            continue;
-        };
-        if fresh
-            .as_ref()
-            .is_some_and(|fresh| fresh.is_inside(&paths.expand(path)))
-        {
-            continue;
-        }
-        match remove(ctx, repo, worktree, now)? {
-            Ok(removed) => outcome.removed.push(removed),
-            Err(message) => {
-                refusals.insert(path.clone(), message);
+    let due: Vec<&Inspected> = plan
+        .removals
+        .iter()
+        .filter_map(|path| {
+            inspection
+                .worktrees
+                .iter()
+                .find(|worktree| &worktree.key == path)
+        })
+        .filter(|worktree| {
+            !fresh
+                .as_ref()
+                .is_some_and(|fresh| fresh.is_inside(&paths.expand(&worktree.key)))
+        })
+        .collect();
+    for chunk in due.chunks(PARALLEL_REMOVALS) {
+        for (worktree, result) in chunk.iter().zip(remove_together(ctx, repo, chunk, now)?) {
+            match result {
+                Ok(removed) => outcome.removed.push(removed),
+                Err(message) => {
+                    refusals.insert(worktree.key.clone(), message);
+                }
             }
         }
     }
@@ -467,17 +478,30 @@ fn remember(
     })
 }
 
-/// Removes one worktree and then its branch (rule 11), saving its changes to a ref first when
-/// it has any (ADR dirty-merged-worktrees-are-salvaged). `Ok(Err(message))` is git's refusal,
-/// or why the save failed.
-fn remove(
+/// How many `git worktree remove` commands run at once. Each one is bound by the kernel's
+/// unlink and lstat calls over a folder of many small files (a `node_modules`), not by the CPU,
+/// so a few side by side finish sooner; more only queue on the same filesystem and make a
+/// removal that is already slow compete with the owner's own work.
+pub(crate) const PARALLEL_REMOVALS: usize = 4;
+
+/// A worktree whose changes, if it had any, are saved, and whose `git worktree remove` is
+/// chosen but not yet run.
+pub(crate) struct PreparedRemoval {
+    args: Vec<String>,
+    salvaged_to: Option<String>,
+}
+
+/// Phase one of a removal, on the calling thread: saves the worktree's changes to a ref when it
+/// has any (ADR dirty-merged-worktrees-are-salvaged) and chooses the arguments of
+/// `git worktree remove`. `Ok(Err(message))` is why the save failed.
+fn prepare_removal(
     ctx: &Ctx,
     repo: &Repo,
     worktree: &Inspected,
     now: DateTime<Utc>,
-) -> Result<Result<Removed, String>> {
+) -> Result<Result<PreparedRemoval, String>> {
     let path = ctx.paths.expand(&worktree.key);
-    let path_text = path.to_string_lossy();
+    let path_text = path.to_string_lossy().into_owned();
     let has_changes = worktree.facts.dirt == Some(Dirt::Changes);
     let salvaged_to = match (&worktree.facts.salvage, &worktree.head) {
         (Some(Salvage::Ready { .. }), Some(head)) if has_changes => {
@@ -494,12 +518,70 @@ fn remove(
         // Only a save makes `--force` safe; a dirty worktree without one is git's to refuse.
         _ => None,
     };
-    let args: &[&str] = if salvaged_to.is_some() {
-        &["worktree", "remove", "--force", &path_text]
+    let args = if salvaged_to.is_some() {
+        vec!["worktree", "remove", "--force", &path_text]
     } else {
-        &["worktree", "remove", &path_text]
+        vec!["worktree", "remove", &path_text]
     };
-    let Some(output) = ctx.write_output(&repo.path, args)? else {
+    Ok(Ok(PreparedRemoval {
+        args: args.into_iter().map(str::to_string).collect(),
+        salvaged_to,
+    }))
+}
+
+/// Phase two: runs the `git worktree remove` of each prepared removal, in `repo_dir` of its own,
+/// at most [`PARALLEL_REMOVALS`] at a time. Answers in the order of `jobs`; a dry run runs
+/// nothing and answers `None` for each. The log lines are written here, in order, before any
+/// command starts: [`Ctx`] is not shared with the threads, which only run git.
+pub(crate) fn run_removals(
+    ctx: &Ctx,
+    jobs: &[(&Path, &PreparedRemoval)],
+) -> Vec<Result<Option<Output>>> {
+    let git_binary: &OsStr = &ctx.paths.git;
+    let mut answers = Vec::with_capacity(jobs.len());
+    for chunk in jobs.chunks(PARALLEL_REMOVALS) {
+        for (dir, prepared) in chunk {
+            let args: Vec<&str> = prepared.args.iter().map(String::as_str).collect();
+            ctx.announce(dir, &args, &[]);
+        }
+        if ctx.dry_run {
+            answers.extend(chunk.iter().map(|_| Ok(None)));
+            continue;
+        }
+        std::thread::scope(|scope| {
+            let running: Vec<_> = chunk
+                .iter()
+                .map(|(dir, prepared)| {
+                    scope.spawn(move || {
+                        let args: Vec<&str> = prepared.args.iter().map(String::as_str).collect();
+                        git::command(git_binary, dir, &args)
+                            .output()
+                            .with_context(|| format!("running git {}", args.join(" ")))
+                    })
+                })
+                .collect();
+            for handle in running {
+                answers.push(match handle.join() {
+                    Ok(output) => output.map(Some),
+                    Err(_) => Err(anyhow::anyhow!("a git worktree remove thread panicked")),
+                });
+            }
+        });
+    }
+    answers
+}
+
+/// Phase three, on the calling thread: reads what git said and deletes the branch (rule 11).
+/// `output` is `None` in a dry run. `Ok(Err(message))` is git's refusal.
+fn finish_removal(
+    ctx: &Ctx,
+    repo: &Repo,
+    worktree: &Inspected,
+    prepared: PreparedRemoval,
+    output: Option<Output>,
+) -> Result<Result<Removed, String>> {
+    let salvaged_to = prepared.salvaged_to;
+    let Some(output) = output else {
         return Ok(Ok(Removed {
             path: worktree.key.clone(),
             branch: worktree.branch.clone(),
@@ -527,6 +609,42 @@ fn remove(
         branch_kept,
         salvaged_to,
     }))
+}
+
+/// Removes up to [`PARALLEL_REMOVALS`] worktrees of `repo` together and then their branches
+/// (rule 11), saving the changes of each to a ref first when it has any. The answers keep the
+/// order of `worktrees`: `Ok(Err(message))` is git's refusal, or why a save failed, and does not
+/// stop the others.
+fn remove_together(
+    ctx: &Ctx,
+    repo: &Repo,
+    worktrees: &[&Inspected],
+    now: DateTime<Utc>,
+) -> Result<Vec<Result<Removed, String>>> {
+    let mut answers: Vec<Option<Result<Removed, String>>> =
+        worktrees.iter().map(|_| None).collect();
+    let mut prepared = Vec::new();
+    for (index, worktree) in worktrees.iter().enumerate() {
+        match prepare_removal(ctx, repo, worktree, now)? {
+            Ok(removal) => prepared.push((index, removal)),
+            Err(message) => answers[index] = Some(Err(message)),
+        }
+    }
+    let jobs: Vec<(&Path, &PreparedRemoval)> = prepared
+        .iter()
+        .map(|(_, removal)| (repo.path.as_path(), removal))
+        .collect();
+    let outputs = run_removals(ctx, &jobs);
+    for ((index, removal), output) in prepared.into_iter().zip(outputs) {
+        answers[index] = Some(finish_removal(
+            ctx,
+            repo,
+            worktrees[index],
+            removal,
+            output?,
+        )?);
+    }
+    Ok(answers.into_iter().flatten().collect())
 }
 
 /// `git branch -D` when the branch tip is HEAD and the merged pull request contains it (rule
@@ -668,6 +786,8 @@ pub(crate) struct Judged {
     /// Read before the second removal: a process that started inside a worktree since the
     /// inspection keeps it, as in a pass ([`locked_pass`]).
     fresh: Option<WorkingDirectories>,
+    /// The repo as `state.json` keys it.
+    repo_key: String,
 }
 
 impl Judged {
@@ -700,6 +820,7 @@ impl Judged {
             inspection,
             removals: 0,
             fresh: None,
+            repo_key: paths.tilde(&repo.path),
         }))
     }
 
@@ -712,6 +833,25 @@ impl Judged {
         key: &str,
         now: DateTime<Utc>,
     ) -> Result<Attempt> {
+        let prepared = match self.queue(ctx, repo, key, now)? {
+            Queued::Decided(attempt) => return Ok(attempt),
+            Queued::Ready(prepared) => prepared,
+        };
+        let output = run_removals(ctx, &[(repo.path.as_path(), &prepared)]).remove(0)?;
+        self.finish(ctx, repo, key, prepared, output)
+    }
+
+    /// Phase one of a removal: judges the worktree `key` and, when it may go, prepares it. The
+    /// guards are the ones [`Judged::remove`] always had: removable in the inspection, and no
+    /// process started inside it since, looked for before every removal after the first (those
+    /// queued and not yet finished count).
+    pub(crate) fn queue(
+        &mut self,
+        ctx: &Ctx,
+        repo: &Repo,
+        key: &str,
+        now: DateTime<Utc>,
+    ) -> Result<Queued> {
         let paths = &ctx.paths;
         let (worktree, row) = self
             .inspection
@@ -721,7 +861,7 @@ impl Judged {
             .find(|(worktree, _)| worktree.key == key)
             .context("the worktree disappeared while reap looked at it")?;
         if worktree.state != State::Removable {
-            return Ok(Attempt::NotRemovable(row.reason.clone()));
+            return Ok(Queued::Decided(Attempt::NotRemovable(row.reason.clone())));
         }
         if self.removals > 0 {
             if self.fresh.is_none() {
@@ -734,37 +874,76 @@ impl Judged {
                 .as_ref()
                 .is_some_and(|fresh| fresh.is_inside(&paths.expand(key)))
             {
-                return Ok(Attempt::NotRemovable(
+                return Ok(Queued::Decided(Attempt::NotRemovable(
                     "a process started inside it".to_string(),
-                ));
+                )));
             }
         }
-        let removed = remove(ctx, repo, worktree, now)?;
+        // Counted once it passes the guards, as the serial removal did: a refusal counts too.
         self.removals += 1;
-        if !ctx.dry_run {
-            state_file::update(paths, &paths.tilde(&repo.path), |memory| {
-                memory.clocks.remove(key);
-                match &removed {
-                    Ok(_) => {
-                        memory.refusals.remove(key);
-                    }
-                    Err(message) => {
-                        memory.refusals.insert(
-                            key.to_string(),
-                            Refusal {
-                                head: worktree.head.clone().unwrap_or_default(),
-                                message: message.clone(),
-                            },
-                        );
-                    }
-                }
-            })?;
-        }
-        Ok(match removed {
-            Ok(removed) => Attempt::Removed(removed),
-            Err(message) => Attempt::Refused(message),
+        let head = worktree.head.clone().unwrap_or_default();
+        Ok(match prepare_removal(ctx, repo, worktree, now)? {
+            Ok(prepared) => Queued::Ready(prepared),
+            Err(message) => Queued::Decided(self.refuse(ctx, key, &head, message)?),
         })
     }
+
+    /// Phase three of a removal queued by [`Judged::queue`]: the branch, then the clock and any
+    /// refusal in `state.json`. `output` is `None` in a dry run.
+    pub(crate) fn finish(
+        &mut self,
+        ctx: &Ctx,
+        repo: &Repo,
+        key: &str,
+        prepared: PreparedRemoval,
+        output: Option<Output>,
+    ) -> Result<Attempt> {
+        let worktree = self
+            .inspection
+            .worktrees
+            .iter()
+            .find(|worktree| worktree.key == key)
+            .context("the worktree disappeared while reap looked at it")?;
+        let head = worktree.head.clone().unwrap_or_default();
+        match finish_removal(ctx, repo, worktree, prepared, output)? {
+            Ok(removed) => {
+                if !ctx.dry_run {
+                    state_file::update(&ctx.paths, &ctx.paths.tilde(&repo.path), |memory| {
+                        memory.clocks.remove(key);
+                        memory.refusals.remove(key);
+                    })?;
+                }
+                Ok(Attempt::Removed(removed))
+            }
+            Err(message) => self.refuse(ctx, key, &head, message),
+        }
+    }
+
+    /// Records a refusal at the worktree's HEAD, unless this is a dry run.
+    fn refuse(&self, ctx: &Ctx, key: &str, head: &str, message: String) -> Result<Attempt> {
+        if !ctx.dry_run {
+            let repo_key = self.repo_key.as_str();
+            state_file::update(&ctx.paths, repo_key, |memory| {
+                memory.clocks.remove(key);
+                memory.refusals.insert(
+                    key.to_string(),
+                    Refusal {
+                        head: head.to_string(),
+                        message: message.clone(),
+                    },
+                );
+            })?;
+        }
+        Ok(Attempt::Refused(message))
+    }
+}
+
+/// What judging a worktree for removal came to.
+pub(crate) enum Queued {
+    /// Settled without running git: not removable, or its save failed.
+    Decided(Attempt),
+    /// Ready for [`run_removals`], then [`Judged::finish`].
+    Ready(PreparedRemoval),
 }
 
 /// *Save and remove* and `git reap salvage <worktree>` (ADR 0006 rules 6 and 7): under the
