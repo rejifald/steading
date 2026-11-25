@@ -5,17 +5,19 @@
 //! Every removal goes through the guarded path of a normal one ([`sweep::Judged`]): each repo is
 //! inspected once under its lock when its first candidate comes up, and every candidate is
 //! judged against that inspection, with a fresh look for processes after the first removal (ADR
-//! unanswered-checks-keep-the-clock). git is never forced beyond what rules 4 and 11 allow, and
+//! unanswered-checks-keep-the-clock). Candidates go in batches of up to
+//! [`sweep::PARALLEL_REMOVALS`], whose `git worktree remove` commands run side by side; the free
+//! space is read once per batch. git is never forced beyond what rules 4 and 11 allow, and
 //! a repo another run or git-tether holds is skipped until the next tick. Only
 //! `State::Removable` worktrees of `policy = "auto"` repos are candidates; `policy = "ask"`
 //! repos are reported for a notification, and dirty, kept, in-use and locked worktrees are
 //! named as what still holds the space.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
@@ -25,7 +27,7 @@ use crate::ctx::Ctx;
 use crate::paths::Paths;
 use crate::report::{self, RepoReport};
 use crate::state_file::{self, VolumeMemory};
-use crate::sweep::{self, Attempt, Judged, Refused, Removed};
+use crate::sweep::{self, Attempt, Judged, PARALLEL_REMOVALS, Queued, Refused, Removed};
 use crate::volume::{ReadVolume, Volume};
 
 /// A worktree that holds space on a low volume, and why reap does not free it.
@@ -132,26 +134,53 @@ pub(crate) fn largest_first(candidates: &mut [Candidate]) {
     candidates.sort_by(|a, b| b.bytes.cmp(&a.bytes).then_with(|| a.key.cmp(&b.key)));
 }
 
-/// Walks `candidates` in order, removing each through `remove` until the volume is healthy.
-/// `healthy_at(repo)` is the free space at which that repo's worktrees stop being removed, so a
-/// repo with a lower `low_disk` is spared before one with a higher. `remove` gets the free
-/// space now and answers with the free space after a removal, or `None` when it removed
-/// nothing. Returns the indices of the candidates removed and the free space at the end.
+/// Walks `candidates` in order, removing them in batches through `remove_batch` until the volume
+/// is healthy. `healthy_at(repo)` is the free space at which that repo's worktrees stop being
+/// removed, so a repo with a lower `low_disk` is spared before one with a higher.
+///
+/// A batch takes the next candidates, up to [`PARALLEL_REMOVALS`], while the free space plus
+/// what the batch holds so far is still short of the candidate's healthy point: it never
+/// deliberately removes more than the estimate says is needed. A candidate the estimate leaves
+/// out waits for the next batch, judged then against the free space as it really is.
+/// `remove_batch` gets the batch and the free space now, and answers which of the batch it
+/// removed and the free space after. Returns the indices of the candidates removed and the free
+/// space at the end.
 pub(crate) fn reclaim(
     candidates: &[Candidate],
     mut available: u64,
     healthy_at: impl Fn(usize) -> u64,
-    mut remove: impl FnMut(&Candidate, u64) -> Option<u64>,
+    mut remove_batch: impl FnMut(&[&Candidate], u64) -> (Vec<bool>, u64),
 ) -> (Vec<usize>, u64) {
     let mut removed = Vec::new();
-    for (index, candidate) in candidates.iter().enumerate() {
-        if available >= healthy_at(candidate.repo) {
-            continue;
+    let mut waiting: Vec<usize> = (0..candidates.len()).collect();
+    while !waiting.is_empty() {
+        let mut batch: Vec<usize> = Vec::new();
+        let mut estimated = available;
+        let mut left_for_later = Vec::new();
+        for &index in &waiting {
+            let candidate = &candidates[index];
+            let is_needed = estimated < healthy_at(candidate.repo);
+            if is_needed && batch.len() < PARALLEL_REMOVALS {
+                batch.push(index);
+                estimated = estimated.saturating_add(candidate.bytes);
+            } else if is_needed || !batch.is_empty() {
+                left_for_later.push(index);
+            }
+            // Otherwise the volume is already healthy for its repo: it is not removed.
         }
-        if let Some(after) = remove(candidate, available) {
-            removed.push(index);
-            available = after;
+        if batch.is_empty() {
+            break;
         }
+        let members: Vec<&Candidate> = batch.iter().map(|&index| &candidates[index]).collect();
+        let (was_removed, after) = remove_batch(&members, available);
+        removed.extend(
+            batch
+                .iter()
+                .zip(was_removed)
+                .filter_map(|(&index, was_removed)| was_removed.then_some(index)),
+        );
+        available = after;
+        waiting = left_for_later;
     }
     (removed, available)
 }
@@ -487,26 +516,96 @@ impl Attempts {
         })
     }
 
-    /// Tries to remove `candidate` through the guarded path. Answers with the volume's free
-    /// space after a removal, `None` when nothing was removed.
-    fn remove(
+    /// Tries to remove `batch` through the guarded path: each candidate is judged and prepared
+    /// in order, the `git worktree remove` commands of those that may go run side by side, and
+    /// each is finished in order. Answers which of `batch` were removed, and the volume's free
+    /// space after (read once). A candidate that was refused, is no longer removable or sits in
+    /// a busy repo does not stop the others.
+    fn remove_batch(
+        &mut self,
+        ctx: &Ctx,
+        repos: &[Repo],
+        volume: &Volume,
+        batch: &[&Candidate],
+        available: u64,
+        now: DateTime<Utc>,
+    ) -> (Vec<bool>, u64) {
+        let mut ready = Vec::new();
+        for (position, candidate) in batch.iter().enumerate() {
+            if self.busy.contains(&candidate.repo) {
+                continue;
+            }
+            let repo = &repos[candidate.repo];
+            let queued =
+                self.judged(ctx, repo, candidate.repo, now)
+                    .and_then(|judged| match judged {
+                        Ok(judged) => judged.queue(ctx, repo, &candidate.key, now).map(Ok),
+                        Err(why) => Ok(Err(why)),
+                    });
+            match queued {
+                Ok(Ok(Queued::Ready(prepared))) => ready.push((position, prepared)),
+                Ok(Ok(Queued::Decided(attempt))) => {
+                    self.settle(ctx, repo, candidate, Ok(attempt));
+                }
+                Ok(Err(why)) => {
+                    self.busy.insert(candidate.repo);
+                    self.skipped.push(Refused {
+                        path: ctx.paths.tilde(&repo.path),
+                        message: why,
+                    });
+                }
+                Err(e) => {
+                    self.settle(ctx, repo, candidate, Err(e));
+                }
+            }
+        }
+        let jobs: Vec<(&Path, &sweep::PreparedRemoval)> = ready
+            .iter()
+            .map(|(position, prepared)| (repos[batch[*position].repo].path.as_path(), prepared))
+            .collect();
+        let outputs = sweep::run_removals(ctx, &jobs);
+        drop(jobs);
+        let mut was_removed = vec![false; batch.len()];
+        for ((position, prepared), output) in ready.into_iter().zip(outputs) {
+            let candidate = batch[position];
+            let repo = &repos[candidate.repo];
+            let attempt = output.and_then(|output| match self.held.get_mut(&candidate.repo) {
+                Some(judged) => judged.finish(ctx, repo, &candidate.key, prepared, output),
+                None => bail!("the lock on {} was lost", ctx.paths.tilde(&repo.path)),
+            });
+            was_removed[position] = self.settle(ctx, repo, candidate, attempt);
+        }
+        let freed: Vec<&&Candidate> = batch
+            .iter()
+            .zip(&was_removed)
+            .filter_map(|(candidate, was_removed)| was_removed.then_some(candidate))
+            .collect();
+        let after = match freed.first() {
+            None => available,
+            Some(_) if ctx.dry_run => freed.iter().fold(available, |sum, candidate| {
+                sum.saturating_add(candidate.bytes)
+            }),
+            Some(first) => {
+                // The worktrees' folders are gone: read the parent of the first, and the mount
+                // point if that is gone too.
+                let parent = first.folder.parent().unwrap_or(&volume.mount);
+                let reading = ctx
+                    .volume_of(parent)
+                    .or_else(|_| ctx.volume_of(&volume.mount));
+                reading.map_or(available, |now| now.available)
+            }
+        };
+        (was_removed, after)
+    }
+
+    /// Records what an attempt on `candidate` came to; whether it removed the worktree.
+    fn settle(
         &mut self,
         ctx: &Ctx,
         repo: &Repo,
-        volume: &Volume,
         candidate: &Candidate,
-        available: u64,
-        now: DateTime<Utc>,
-    ) -> Option<u64> {
-        if self.busy.contains(&candidate.repo) {
-            return None;
-        }
-        let attempt = self
-            .judged(ctx, repo, candidate.repo, now)
-            .and_then(|judged| match judged {
-                Ok(judged) => judged.remove(ctx, repo, &candidate.key, now),
-                Err(why) => Ok(Attempt::Busy(why)),
-            });
+        attempt: Result<Attempt>,
+    ) -> bool {
         let message = match attempt {
             Ok(Attempt::Removed(removed)) => {
                 self.removed.push(Reclaimed {
@@ -514,26 +613,17 @@ impl Attempts {
                     removed,
                     bytes: candidate.bytes,
                 });
-                if ctx.dry_run {
-                    return Some(available.saturating_add(candidate.bytes));
-                }
-                // The worktree's folder is gone: read its parent, and the mount point if that
-                // is gone too.
-                let parent = candidate.folder.parent().unwrap_or(&volume.mount);
-                let reading = ctx
-                    .volume_of(parent)
-                    .or_else(|_| ctx.volume_of(&volume.mount));
-                return Some(reading.map_or(available, |now| now.available));
+                return true;
             }
             // It stopped being removable between the survey and the lock.
-            Ok(Attempt::NotRemovable(_)) => return None,
+            Ok(Attempt::NotRemovable(_)) => return false,
             Ok(Attempt::Busy(why)) => {
                 self.busy.insert(candidate.repo);
                 self.skipped.push(Refused {
                     path: ctx.paths.tilde(&repo.path),
                     message: why,
                 });
-                return None;
+                return false;
             }
             Ok(Attempt::Refused(message)) => message,
             Err(e) => format!("{e:#}"),
@@ -542,7 +632,7 @@ impl Attempts {
             path: candidate.key.clone(),
             message,
         });
-        None
+        false
     }
 }
 
@@ -567,16 +657,7 @@ fn relieve(
         &eligible,
         volume.available,
         |repo| repos[repo].low_disk.healthy_at(volume.total).unwrap_or(0),
-        |candidate, available| {
-            attempts.remove(
-                ctx,
-                &repos[candidate.repo],
-                volume,
-                candidate,
-                available,
-                now,
-            )
-        },
+        |batch, available| attempts.remove_batch(ctx, repos, volume, batch, available, now),
     );
     let Attempts {
         busy,
@@ -652,6 +733,25 @@ mod tests {
         assert_eq!(keys, ["~/big", "~/a", "~/b", "~/none"]);
     }
 
+    /// Adapts a per-candidate remover to the batch one `reclaim` takes: each answers with the
+    /// free space after it, or `None` when it removed nothing.
+    fn one_by_one(
+        mut remove: impl FnMut(&Candidate, u64) -> Option<u64>,
+    ) -> impl FnMut(&[&Candidate], u64) -> (Vec<bool>, u64) {
+        move |batch, mut available| {
+            let removed = batch
+                .iter()
+                .map(|candidate| {
+                    remove(candidate, available).is_some_and(|after| {
+                        available = after;
+                        true
+                    })
+                })
+                .collect();
+            (removed, available)
+        }
+    }
+
     #[test]
     fn removal_stops_once_the_volume_is_healthy_and_the_rest_keep_their_clocks() {
         let candidates = [
@@ -665,16 +765,89 @@ mod tests {
             &candidates,
             80,
             |_| 150,
-            |candidate, available| {
+            one_by_one(|candidate, available| {
                 tried.push(candidate.key.clone());
                 Some(available + candidate.bytes)
-            },
+            }),
         );
 
         // 80 + 60 = 140 is still short of 150; 140 + 40 = 180 is not.
         assert_eq!(removed, [0, 1]);
         assert_eq!(available, 180);
         assert_eq!(tried, ["~/a", "~/b"]);
+    }
+
+    #[test]
+    fn a_batch_stops_before_the_estimated_healthy_point() {
+        let candidates = [
+            candidate(0, "~/a", 60),
+            candidate(0, "~/b", 50),
+            candidate(0, "~/c", 40),
+            candidate(0, "~/d", 30),
+        ];
+        let mut batches = Vec::new();
+
+        let (removed, available) = reclaim(
+            &candidates,
+            0,
+            |_| 100,
+            |batch, available| {
+                batches.push(batch.iter().map(|c| c.key.clone()).collect::<Vec<_>>());
+                let freed: u64 = batch.iter().map(|c| c.bytes).sum();
+                (vec![true; batch.len()], available + freed)
+            },
+        );
+
+        // 0 + 60 is short of 100, so `b` joins; 0 + 110 is not, so `c` stays out.
+        assert_eq!(batches, [["~/a", "~/b"]]);
+        assert_eq!(removed, [0, 1]);
+        assert_eq!(available, 110);
+    }
+
+    #[test]
+    fn a_batch_holds_at_most_the_parallel_limit_and_the_rest_follow() {
+        let candidates: Vec<_> = (0..9)
+            .map(|index| candidate(0, &format!("~/w{index}"), 1))
+            .collect();
+        let mut sizes = Vec::new();
+
+        let (removed, available) = reclaim(
+            &candidates,
+            0,
+            |_| 100,
+            |batch, available| {
+                sizes.push(batch.len());
+                (vec![true; batch.len()], available + batch.len() as u64)
+            },
+        );
+
+        assert_eq!(sizes, [4, 4, 1]);
+        assert_eq!(removed.len(), 9);
+        assert_eq!(available, 9);
+    }
+
+    #[test]
+    fn a_candidate_the_estimate_left_out_is_judged_again_on_the_real_free_space() {
+        let candidates = [candidate(0, "~/a", 60), candidate(0, "~/b", 60)];
+
+        // `a` is estimated to be enough, but frees nothing: `b` must still go.
+        let (removed, _) = reclaim(
+            &candidates,
+            0,
+            |_| 50,
+            one_by_one(|candidate, available| {
+                Some(
+                    available
+                        + if candidate.key == "~/a" {
+                            0
+                        } else {
+                            candidate.bytes
+                        },
+                )
+            }),
+        );
+
+        assert_eq!(removed, [0, 1]);
     }
 
     #[test]
@@ -689,7 +862,9 @@ mod tests {
             &candidates,
             0,
             |_| 100,
-            |candidate, available| (candidate.repo == 0).then(|| available + candidate.bytes),
+            one_by_one(|candidate, available| {
+                (candidate.repo == 0).then(|| available + candidate.bytes)
+            }),
         );
 
         assert_eq!(removed, [0, 2]);
@@ -705,9 +880,12 @@ mod tests {
         ];
         let healthy = |repo: usize| if repo == 0 { 120 } else { 60 };
 
-        let (removed, _) = reclaim(&candidates, 50, healthy, |candidate, available| {
-            Some(available + candidate.bytes)
-        });
+        let (removed, _) = reclaim(
+            &candidates,
+            50,
+            healthy,
+            one_by_one(|candidate, available| Some(available + candidate.bytes)),
+        );
 
         // 50 -> 100 after `a`; repo 1 is healthy at 60, repo 0 is not at 120.
         assert_eq!(removed, [0, 2]);

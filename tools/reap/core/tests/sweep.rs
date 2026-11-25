@@ -425,3 +425,94 @@ fn a_due_sweep_respects_pause_and_the_interval() {
     assert!(too_soon.is_empty());
     assert!(paused.is_empty());
 }
+
+/// Opens `count` worktrees named `w0`, `w1`, ...; every odd one has a commit of its own that
+/// the local main never saw, so `git branch -d` keeps its branch.
+fn many_worktrees(sandbox: &Sandbox, count: usize) -> Vec<std::path::PathBuf> {
+    (0..count)
+        .map(|index| {
+            let folder = sandbox.worktree(&format!("w{index}"));
+            if index % 2 == 1 {
+                commit(&folder, "done");
+                sandbox.merge_on_remote(&format!("w{index}"), "main");
+            }
+            folder
+        })
+        .collect()
+}
+
+#[test]
+fn more_worktrees_than_the_parallel_limit_are_all_removed_with_their_branches_handled() {
+    let sandbox = Sandbox::new();
+    let folders = many_worktrees(&sandbox, 9);
+    sandbox.list_clone();
+
+    sweep_at(&sandbox, Utc::now());
+    let due = sweep_at(&sandbox, later(25));
+
+    assert_eq!(due.removed.len(), 9, "{:?}", due.refused);
+    assert!(due.refused.is_empty(), "{:?}", due.refused);
+    assert!(folders.iter().all(|folder| !folder.exists()));
+    // The order of the plan, as a serial pass would report it.
+    let mut paths: Vec<_> = due
+        .removed
+        .iter()
+        .map(|removed| removed.path.clone())
+        .collect();
+    let reported = paths.clone();
+    paths.sort();
+    assert_eq!(reported, paths);
+    for (index, removed) in due.removed.iter().enumerate() {
+        let name = format!("w{index}");
+        assert!(removed.path.ends_with(&name), "{removed:?}");
+        if index % 2 == 1 {
+            // Unmerged locally: only `-d` ran, which keeps the branch.
+            assert!(removed.branch_kept.is_some(), "{removed:?}");
+            assert!(branch_exists(&sandbox, &name));
+        } else {
+            assert_eq!(removed.branch_kept, None, "{removed:?}");
+            assert!(!branch_exists(&sandbox, &name));
+        }
+    }
+    assert_eq!(
+        git(&sandbox.clone, &["worktree", "list"]).lines().count(),
+        1
+    );
+}
+
+#[test]
+fn a_refused_removal_in_a_batch_does_not_stop_the_others() {
+    let sandbox = Sandbox::new();
+    std::fs::write(sandbox.clone.join(".git/info/exclude"), "blocked/\n").unwrap();
+    let folders = many_worktrees(&sandbox, 6);
+    // An ignored folder git cannot read is no change to it, but `git worktree remove` cannot
+    // delete it.
+    let blocked = folders[2].join("blocked");
+    std::fs::create_dir(&blocked).unwrap();
+    std::fs::write(blocked.join("file"), "x").unwrap();
+    std::fs::set_permissions(
+        &blocked,
+        std::os::unix::fs::PermissionsExt::from_mode(0o000),
+    )
+    .unwrap();
+    sandbox.list_clone();
+
+    sweep_at(&sandbox, Utc::now());
+    let due = sweep_at(&sandbox, later(25));
+    std::fs::set_permissions(
+        &blocked,
+        std::os::unix::fs::PermissionsExt::from_mode(0o755),
+    )
+    .unwrap();
+
+    assert_eq!(due.refused.len(), 1, "{due:?}");
+    assert!(due.refused[0].path.ends_with("w2"));
+    assert_eq!(due.removed.len(), 5);
+    for (index, folder) in folders.iter().enumerate() {
+        assert_eq!(folder.exists(), index == 2, "w{index}");
+    }
+    // The refused worktree keeps its branch, and the others' branches were handled.
+    assert!(branch_exists(&sandbox, "w2"));
+    assert!(!branch_exists(&sandbox, "w0"));
+    assert!(branch_exists(&sandbox, "w1"));
+}

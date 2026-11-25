@@ -91,6 +91,19 @@ impl Ctx {
         args: &[&str],
         env: &[(&str, &OsStr)],
     ) -> Result<Option<Output>> {
+        if self.announce(dir, args, env) {
+            return Ok(None);
+        }
+        git::command(&self.paths.git, dir, args)
+            .envs(env.iter().copied())
+            .output()
+            .with_context(|| format!("running git {}", args.join(" ")))
+            .map(Some)
+    }
+
+    /// Logs a mutating git command as `run: ...`, or `would run: ...` in a dry run, and says
+    /// whether it is a dry run. For a caller that starts the command itself, off this thread.
+    pub(crate) fn announce(&self, dir: &Path, args: &[&str], env: &[(&str, &OsStr)]) -> bool {
         let mut words: Vec<String> = env
             .iter()
             .map(|(name, value)| format!("{name}={}", self.paths.tilde(Path::new(value))))
@@ -100,14 +113,10 @@ impl Ctx {
         let shown = words.join(" ");
         if self.dry_run {
             self.note(format!("would run: {shown}"));
-            return Ok(None);
+            return true;
         }
         self.note(format!("run: {shown}"));
-        git::command(&self.paths.git, dir, args)
-            .envs(env.iter().copied())
-            .output()
-            .with_context(|| format!("running git {}", args.join(" ")))
-            .map(Some)
+        false
     }
 
     /// Like [`Ctx::write_output`] but a non-zero exit is an error.
